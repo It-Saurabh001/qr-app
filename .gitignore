@@ -31,6 +31,7 @@ yarn-error.*
 *.pem
 
 # local env files
+.env
 .env*.local
 
 # typescript
@@ -41,3 +42,12 @@ example
 # generated native folders
 /ios
 /android
+
+#firebase credential
+google-services.json
+GoogleService-Info.plist
+
+#cloude functions runtime exclusion
+functions/node_modules/
+functions/lib/
+functions/.env

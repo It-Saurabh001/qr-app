@@ -1,0 +1,203 @@
+
+flowchart TD
+    A([Install QR Studio]) --> B[Open App]
+    B --> C[Initialize App]
+    C --> C1[Load persisted Redux settings]
+    C1 --> C2[Restore local guest session from SecureStore]
+    C2 --> C3[Initialize Firebase Auth listener]
+    C3 --> D{First launch?}
+
+    D -- Yes --> E[Onboarding: 3 slides]
+    E --> F[Welcome Screen]
+    F --> G[Get Started]
+    G --> H[Sign In Screen]
+
+    D -- No --> I{Valid local guest session?}
+    I -- Yes --> J[Restore Guest State]
+    I -- No --> K{Firebase user authenticated?}
+    K -- Yes --> L[Restore Account State]
+    K -- No --> H
+
+    H --> M{Choose an option}
+
+    M -- Sign In --> N[Enter email and password]
+    N --> N1{Credentials valid?}
+    N1 -- No --> N2[Show validation or auth error]
+    N2 --> N
+    N1 -- Yes --> O[Firebase Auth sign in]
+    O --> O1{Authentication successful?}
+    O1 -- No --> N2
+    O1 -- Yes --> P{Local guest data exists?}
+
+    M -- Create Account --> Q[Open Sign Up Screen]
+    Q --> Q1[Enter name, email and password]
+    Q1 --> Q2{Input valid?}
+    Q2 -- No --> Q3[Show validation error]
+    Q3 --> Q1
+    Q2 -- Yes --> Q4[Create Firebase account]
+    Q4 --> Q5{Account created?}
+    Q5 -- No --> Q3
+    Q5 -- Yes --> P
+
+    M -- Forgot Password --> R[Enter registered email]
+    R --> R1[Send Firebase password-reset email]
+    R1 --> R2[Show success or error]
+    R2 --> H
+
+    M -- Continue as Guest --> S[Save guest session in SecureStore]
+    S --> S1[Set localGuest.active = true]
+    S1 --> S2[Open Main App]
+    J --> S2
+    L --> T[Load account profile and cloud data]
+    T --> S2
+
+    P -- Yes --> U[Offer local history migration]
+    P -- No --> T
+    U --> U1{User chooses to migrate?}
+    U1 -- Yes --> U2[Validate and upload local records]
+    U2 --> U3{All required records confirmed?}
+    U3 -- No --> U4[Keep local data and show retry option]
+    U4 --> U2
+    U3 -- Yes --> U5[Confirm migration and mark records synced]
+    U5 --> U6[Clear guest session only after safe migration]
+    U6 --> T
+    U1 -- Not now --> T
+
+    S2 --> V[Main App: 3-Tab Bottom Navigation]
+
+    V --> HM[Home Screen]
+    V --> SC[Scan QR: Elevated Center Circular Button]
+    V --> CR[Create QR Tab]
+
+    HM --> HM1[Live Offline Metrics: Scanned, Created, Favorites]
+    HM --> HM2[Quick Actions Grid]
+    HM --> HM3[Recent Activity Feed]
+    HM2 --> HI[History Screen via Quick Action]
+    HM2 --> SE[Settings Screen via Header or Quick Action]
+    HM3 --> HI
+
+    HI --> HI_BACK[Back to Home Screen]
+    HI_BACK --> HM
+
+    SE --> SE_BACK[Back to Home Screen]
+    SE_BACK --> HM
+
+    SC --> SC1{Camera permission granted?}
+    SC1 -- No --> SC2[Explain why camera is needed]
+    SC2 --> SC3{User grants permission?}
+    SC3 -- No --> SC4[Offer gallery scan or return]
+    SC3 -- Yes --> SC5[Open live scanner with animated reticle]
+    SC1 -- Yes --> SC5
+    SC4 --> SC6{Choose gallery scan?}
+    SC6 -- Yes --> SC7[Select image and decode code via scanFromURLAsync]
+    SC6 -- No --> V
+    SC5 --> SC8[Detect QR or supported 1D/2D barcode]
+    SC7 --> SC9[Parse scanned content]
+    SC8 --> SC9
+    SC9 --> SC10[Show result card with contextual actions: URL, Wi-Fi, Phone, SMS, Email, Geo]
+    SC10 --> SC11{Auto-save enabled?}
+    SC11 -- Yes --> SC12[Save scan to local Redux/AsyncStorage history]
+    SC11 -- No --> SC13[Keep result without auto-save]
+    SC12 --> SC14{Signed-in account?}
+    SC14 -- Yes --> SC15[Sync scan to Firestore]
+    SC14 -- No --> SC16[Keep scan on device in offline storage]
+    SC13 --> SC17{User manually saves?}
+    SC17 -- Yes --> SC12
+    SC17 -- No --> SC18[Return or continue]
+    SC15 --> SC19{User requests AI explanation?}
+    SC16 --> SC19
+    SC18 --> V
+    SC19 -- Yes --> SC20{Signed in and online?}
+    SC20 -- Yes --> SC21[Call analyzeScan Cloud Function]
+    SC21 --> SC22[Verify Auth, App Check and quota]
+    SC22 --> SC23[Gemini analyzes payload]
+    SC23 --> SC24[Show type, summary and risk hints]
+    SC24 --> SC25{Save AI summary?}
+    SC25 -- Yes --> SC26[Save summary to history]
+    SC25 -- No --> V
+    SC26 --> V
+    SC20 -- No --> SC27[Explain AI needs account and connectivity]
+    SC27 --> V
+    SC19 -- No --> V
+
+    CR --> CR1{Choose QR content type: 8 Offline Formats}
+    CR1 --> CR2[URL or plain text]
+    CR1 --> CR3[Wi-Fi credentials]
+    CR1 --> CR4[Contact vCard, email, SMS or phone]
+    CR1 --> CR5[Geographic coordinates]
+    CR1 --> CR6[Smart Create: natural-language prompt]
+    CR2 --> CR7[Validate payload]
+    CR3 --> CR7
+    CR4 --> CR7
+    CR5 --> CR7
+    CR6 --> CR8{Signed in, online and AI enabled?}
+    CR8 -- Yes --> CR9[Call smartCreate Cloud Function]
+    CR9 --> CR10[Validate output and build structured payload]
+    CR10 --> CR7
+    CR8 -- No --> CR11[Show unavailable message or use manual creation]
+    CR11 --> CR1
+    CR7 --> CR12[Generate QR locally with react-native-qrcode-svg]
+    CR12 --> CR13[Customize colors, error correction L/M/Q/H and optional center logo]
+    CR13 --> CR14[Live SVG Preview]
+    CR14 --> CR15{Choose action}
+    CR15 -- Edit --> CR13
+    CR15 -- Save PNG --> CR16[Save PNG to device gallery via expo-media-library]
+    CR15 -- Share --> CR17[Open native share sheet via expo-sharing]
+    CR15 -- Save to history --> CR18[Save creation locally in Redux/AsyncStorage]
+    CR15 -- Upload --> CR19{Signed-in account and online?}
+    CR19 -- No --> CR20[Keep local creation and queue or retry upload]
+    CR19 -- Yes --> CR21[Call signUpload Cloud Function]
+    CR21 --> CR22[Verify Auth, App Check and quota]
+    CR22 --> CR23[Return short-lived upload signature]
+    CR23 --> CR24[Upload PNG to Cloudinary]
+    CR24 --> CR25[Update creation image metadata in Firestore]
+    CR25 --> CR26[Show upload success]
+    CR16 --> CR18
+    CR17 --> CR18
+    CR18 --> CR27{Signed-in account?}
+    CR27 -- Yes --> CR28[Sync creation metadata to Firestore]
+    CR27 -- No --> CR29[Keep creation in offline local storage]
+    CR20 --> CR29
+    CR28 --> V
+    CR29 --> V
+    CR26 --> V
+
+    HI --> HI1{Current mode}
+    HI1 -- Guest --> HI2[Read local scans and creations from Redux Persist]
+    HI1 -- Account --> HI3[Read account history from Firestore]
+    HI2 --> HI4[Search, filter chips All/Scanned/Created/Favorites, favorite, copy, share or open]
+    HI3 --> HI4
+    HI4 --> HI5{Action}
+    HI5 -- Tap card or View QR --> HI6[Open QR Preview Box Modal: Visual SVG QR + Given Input + Save PNG + Share QR]
+    HI5 -- Favorite --> HI7[Update favorite locally or in Firestore]
+    HI5 -- Delete --> HI8[Confirm deletion alert]
+    HI5 -- Share --> HI9[Share saved content or QR image]
+    HI6 --> HI
+    HI7 --> HI
+    HI9 --> HI
+    HI8 --> HI10{Delete confirmed?}
+    HI10 -- No --> HI4
+    HI10 -- Yes --> HI11[Delete local record or Firestore document]
+    HI11 --> HI12{Deleted creation has Cloudinary asset?}
+    HI12 -- Yes --> HI13[onCreationDeleted trigger removes asset]
+    HI12 -- No --> HI
+    HI13 --> HI
+
+    SE --> SE1[Theme system/light/dark, haptics, sound, auto-save and auto-open settings]
+    SE1 --> SE2[Persist settings locally in AsyncStorage]
+    SE2 --> SE3{Account actions?}
+    SE3 -- No --> HM
+    SE3 -- Create account or sign in --> H
+    SE3 -- Sign out --> SE4[Clear Firebase session]
+    SE4 --> SE5{Keep local guest data?}
+    SE5 -- Yes --> SE6[Start or retain local guest session]
+    SE5 -- No --> SE7[Confirm local data deletion]
+    SE7 --> SE8[Delete only after confirmation]
+    SE6 --> S2
+    SE8 --> H
+    SE3 -- Delete account --> SE9[Confirm irreversible deletion]
+    SE9 --> SE10{Confirmed?}
+    SE10 -- No --> SE1
+    SE10 -- Yes --> SE11[Call deleteAccount Function]
+    SE11 --> SE12[Delete user data, Cloudinary assets and Firebase Auth account]
+    SE12 --> H
