@@ -15,6 +15,7 @@ export type QRHistoryItem = {
   foregroundColor?: string;
   backgroundColor?: string;
   ecl?: "L" | "M" | "Q" | "H";
+  imageUri?: string;
   cloudUrl?: string;
   publicId?: string;
   cloudAssetId?: string;

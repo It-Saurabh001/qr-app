@@ -11,7 +11,7 @@ import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import { StatusBar } from "expo-status-bar";
 import * as WebBrowser from "expo-web-browser";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -23,10 +23,18 @@ import {
   Text,
   View,
 } from "react-native";
+import QRCode from "react-native-qrcode-svg";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { captureRef } from "react-native-view-shot";
 
+import { uploadQrToCloudinary } from "@/services/cloudinary/uploadService";
+import { saveQrToCloudFirestore } from "@/services/firebase/historyService";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
-import { addHistoryItem } from "@/store/slices/historySlice";
+import {
+  addHistoryItem,
+  updateHistoryItem,
+  type QRHistoryItem,
+} from "@/store/slices/historySlice";
 
 const BARCODE_TYPES: BarcodeType[] = [
   "qr",
@@ -67,8 +75,12 @@ function parseWifi(content: string) {
 
 export default function ScanScreen() {
   const dispatch = useAppDispatch();
+  const user = useAppSelector((state) => state.auth.user);
   const settings = useAppSelector((state) => state.settings);
   const [permission, requestPermission] = useCameraPermissions();
+
+  const scanQrRef = useRef<View>(null);
+  const [activeScanItem, setActiveScanItem] = useState<QRHistoryItem | null>(null);
 
   const [torchEnabled, setTorchEnabled] = useState(false);
   const [scanned, setScanned] = useState(false);
@@ -77,6 +89,7 @@ export default function ScanScreen() {
   const [result, setResult] = useState<{
     content: string;
     format: string;
+    imageUri?: string;
   } | null>(null);
 
   // Smooth scan line animation
@@ -124,22 +137,90 @@ export default function ScanScreen() {
     }
   }
 
+  async function processCloudUploadForScan(item: QRHistoryItem) {
+    if (!user?.uid) return;
+
+    try {
+      let imageToUpload = "";
+
+      if (item.imageUri) {
+        console.log(
+          `[ScanScreen] 🖼️ Uploading direct gallery image to Cloudinary CDN for user "${user.uid}"...`,
+        );
+        imageToUpload = item.imageUri;
+      } else {
+        console.log(
+          `[ScanScreen] 🎨 Generating PNG format QR code for scanned content for user "${user.uid}"...`,
+        );
+        setActiveScanItem(item);
+        await new Promise((resolve) => setTimeout(resolve, 200));
+
+        if (scanQrRef.current) {
+          imageToUpload = await captureRef(scanQrRef.current, {
+            format: "png",
+            quality: 1,
+            result: "data-uri",
+          });
+        }
+      }
+
+      if (imageToUpload) {
+        console.log(`[ScanScreen] ⏳ Uploading scan asset to Cloudinary CDN...`);
+        const cldResult = await uploadQrToCloudinary(
+          imageToUpload,
+          item.title || "Scanned Code",
+        );
+        console.log(
+          `[ScanScreen] ✅ Cloudinary upload complete! CDN URL: ${cldResult.secureUrl}`,
+        );
+
+        const changes = {
+          cloudUrl: cldResult.secureUrl,
+          publicId: cldResult.publicId,
+          cloudAssetId: cldResult.assetId,
+          cloudUploadedAt: cldResult.createdAt,
+        };
+
+        dispatch(updateHistoryItem({ id: item.id, changes }));
+        await saveQrToCloudFirestore(user.uid, { ...item, ...changes });
+        console.log(
+          `[ScanScreen] ✅ Firestore document saved with Cloudinary asset link.`,
+        );
+      }
+    } catch (err: any) {
+      console.warn(
+        `[ScanScreen] ⚠️ Cloudinary auto-upload skipped:`,
+        err?.message || err,
+      );
+      if (user?.uid) {
+        saveQrToCloudFirestore(user.uid, item).catch(() => {});
+      }
+    } finally {
+      setActiveScanItem(null);
+    }
+  }
+
   function handleManualSave() {
     if (!result || manuallySaved) return;
 
-    dispatch(
-      addHistoryItem({
-        id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-        content: result.content,
-        format: result.format,
-        type: "scan",
-        title: getTitle(result.content),
-        isFavorite: false,
-        createdAt: new Date().toISOString(),
-      }),
-    );
+    const newItem: QRHistoryItem = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      content: result.content,
+      format: result.format,
+      type: "scan",
+      title: getTitle(result.content),
+      isFavorite: false,
+      createdAt: new Date().toISOString(),
+      imageUri: result.imageUri,
+    };
+
+    dispatch(addHistoryItem(newItem));
     setManuallySaved(true);
     Alert.alert("Saved", "Scanned code has been saved to your history.");
+
+    if (user?.uid) {
+      void processCloudUploadForScan(newItem);
+    }
   }
 
   async function handleOpenUrl(url: string) {
@@ -206,24 +287,33 @@ export default function ScanScreen() {
     void handleCopy();
   }
 
-  async function handleResult(content: string, format: string) {
+  async function handleResult(
+    content: string,
+    format: string,
+    directImageUri?: string,
+  ) {
     if (!content) return;
 
     setScanned(true);
-    setResult({ content, format });
+    setResult({ content, format, imageUri: directImageUri });
 
     if (settings.autoSaveScans) {
-      dispatch(
-        addHistoryItem({
-          id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-          content,
-          format,
-          type: "scan",
-          title: getTitle(content),
-          isFavorite: false,
-          createdAt: new Date().toISOString(),
-        }),
-      );
+      const newItem: QRHistoryItem = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+        content,
+        format,
+        type: "scan",
+        title: getTitle(content),
+        isFavorite: false,
+        createdAt: new Date().toISOString(),
+        imageUri: directImageUri,
+      };
+
+      dispatch(addHistoryItem(newItem));
+
+      if (user?.uid) {
+        void processCloudUploadForScan(newItem);
+      }
     }
 
     if (settings.vibrateOnScan) {
@@ -239,7 +329,7 @@ export default function ScanScreen() {
 
   function onBarcodeScanned(event: BarcodeScanningResult) {
     if (scanned) return;
-    void handleResult(event.data, event.type);
+    void handleResult(event.data, String(event.type));
   }
 
   async function scanFromGallery() {
@@ -278,7 +368,7 @@ export default function ScanScreen() {
         return;
       }
 
-      await handleResult(codes[0].data, codes[0].type);
+      await handleResult(codes[0].data, String(codes[0].type), image.assets[0].uri);
     } catch (error) {
       console.error("Gallery scan failed:", error);
       Alert.alert("Scan failed", "Could not scan this image. Try another one.");
@@ -589,6 +679,41 @@ export default function ScanScreen() {
           </Text>
         </View>
       </ScrollView>
+
+      {/* Off-screen QR rendering canvas for generating PNG format assets for Cloudinary upload */}
+      <View
+        pointerEvents="none"
+        style={{
+          position: "absolute",
+          top: -2000,
+          left: 0,
+          width: 250,
+          height: 250,
+        }}
+        collapsable={false}
+      >
+        {activeScanItem ? (
+          <View
+            ref={scanQrRef}
+            collapsable={false}
+            style={{
+              width: 240,
+              height: 240,
+              backgroundColor: activeScanItem.backgroundColor || "#FFFFFF",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <QRCode
+              value={activeScanItem.content.trim() || " "}
+              size={200}
+              color={activeScanItem.foregroundColor || "#111827"}
+              backgroundColor={activeScanItem.backgroundColor || "#FFFFFF"}
+              ecl={activeScanItem.ecl || "M"}
+            />
+          </View>
+        ) : null}
+      </View>
     </SafeAreaView>
   );
 }

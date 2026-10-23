@@ -13,9 +13,32 @@ import type { QRHistoryItem } from "@/store/slices/historySlice";
 const db = getFirestore();
 
 function sanitizeItem(item: QRHistoryItem): Record<string, unknown> {
+  const { imageUri, ...rest } = item;
   return Object.fromEntries(
-    Object.entries(item).filter(([_, v]) => v !== undefined),
+    Object.entries(rest).filter(([_, v]) => v !== undefined),
   );
+}
+
+function parseCloudDoc(docSnap: any): QRHistoryItem {
+  const data = docSnap.data();
+  return {
+    ...data,
+    format: String(data.format ?? "QR_CODE"),
+  } as QRHistoryItem;
+}
+
+export async function fetchUserCloudHistory(
+  uid: string,
+): Promise<QRHistoryItem[]> {
+  if (!uid) return [];
+  try {
+    const historyRef = collection(db, "users", uid, "history");
+    const snapshot = await getDocs(historyRef);
+    return snapshot.docs.map(parseCloudDoc);
+  } catch (err: any) {
+    console.warn("[FirestoreSync] ⚠️ Error fetching cloud history:", err?.message || err);
+    return [];
+  }
 }
 
 export async function syncGuestHistoryToCloud(
@@ -96,9 +119,7 @@ export async function syncGuestHistoryToCloud(
       ),
     ]);
 
-    const cloudItems = snapshot.docs.map(
-      (document) => document.data() as QRHistoryItem,
-    );
+    const cloudItems = snapshot.docs.map(parseCloudDoc);
 
     console.log(
       `[FirestoreSync] ✅ [2/2] Successfully retrieved ${cloudItems.length} cloud records from Firestore.`,

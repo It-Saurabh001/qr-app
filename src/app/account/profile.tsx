@@ -3,7 +3,7 @@ import * as Clipboard from "expo-clipboard";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -12,16 +12,24 @@ import {
   Text,
   View,
 } from "react-native";
+import QRCode from "react-native-qrcode-svg";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { captureRef } from "react-native-view-shot";
 
 import { clearLocalGuestSession } from "@/services/auth/localGuestSession";
+import { uploadQrToCloudinary } from "@/services/cloudinary/uploadService";
 import { deleteUserAccount } from "@/services/firebase/accountService";
-import { syncGuestHistoryToCloud } from "@/services/firebase/historyService";
+import {
+  fetchUserCloudHistory,
+  syncGuestHistoryToCloud,
+} from "@/services/firebase/historyService";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import { signOut } from "@/store/slices/authSlice";
 import {
   historySelectors,
   mergeHistoryItems,
+  updateHistoryItem,
+  type QRHistoryItem,
 } from "@/store/slices/historySlice";
 import { guestSessionEnded } from "@/store/slices/localGuestSlice";
 
@@ -36,6 +44,11 @@ export default function AccountProfileScreen() {
 
   const [isSyncing, setIsSyncing] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [syncStatusText, setSyncStatusText] = useState("");
+  const [currentSyncItem, setCurrentSyncItem] = useState<QRHistoryItem | null>(
+    null,
+  );
+  const syncQrRef = useRef<View>(null);
 
   const handleCopyUid = async () => {
     console.log('[AccountProfile] 🔘 Button "Copy UID" pressed');
@@ -61,23 +74,163 @@ export default function AccountProfileScreen() {
     }
 
     setIsSyncing(true);
-    console.log(
-      `[AccountProfile] ⏳ Starting cloud sync for ${history.length} local items...`,
-    );
+    setSyncStatusText("Checking local creations...");
 
     try {
-      const syncedItems = await syncGuestHistoryToCloud(user.uid, history);
+      // Step 1: Detect all items (creations and scans, local and remote) needing Cloudinary PNG or direct image upload
+      setSyncStatusText("Checking items for Cloudinary upload...");
+      console.log(`[AccountProfile] 🔍 Fetching and checking records for user "${user.uid}"...`);
+
+      let remoteItems: QRHistoryItem[] = [];
+      try {
+        remoteItems = await fetchUserCloudHistory(user.uid);
+        console.log(`[AccountProfile] ☁️ Found ${remoteItems.length} records in Firestore.`);
+      } catch (e: any) {
+        console.warn("[AccountProfile] ⚠️ Could not fetch existing cloud records ahead of time:", e?.message || e);
+      }
+
+      // Merge remoteItems and local history into a comprehensive map
+      const itemMap = new Map<string, QRHistoryItem>();
+      for (const item of remoteItems) {
+        if (item?.id) itemMap.set(item.id, item);
+      }
+      for (const item of history) {
+        if (!item?.id) continue;
+        const existing = itemMap.get(item.id);
+        itemMap.set(item.id, {
+          ...existing,
+          ...item,
+          cloudUrl: item.cloudUrl || existing?.cloudUrl,
+          publicId: item.publicId || existing?.publicId,
+          cloudAssetId: item.cloudAssetId || existing?.cloudAssetId,
+          cloudUploadedAt: item.cloudUploadedAt || existing?.cloudUploadedAt,
+        });
+      }
+
+      let workingHistory = Array.from(itemMap.values());
+
+      // Filter ALL items (whether type === "create" or "scan") that do NOT have a cloudUrl!
+      const unuploadedItems = workingHistory.filter((item) => !item.cloudUrl);
+
+      if (unuploadedItems.length > 0) {
+        console.log(
+          `[AccountProfile] ⏳ [1/3] Found ${unuploadedItems.length} items missing Cloudinary CDN URL. Uploading...`,
+        );
+
+        for (let idx = 0; idx < unuploadedItems.length; idx++) {
+          const item = unuploadedItems[idx];
+          setSyncStatusText(
+            `Uploading asset ${idx + 1}/${unuploadedItems.length} to Cloudinary...`,
+          );
+
+          // Check if item has a direct image file URI (e.g. from gallery scan or image file)
+          const directImageUri =
+            (item.imageUri &&
+              (item.imageUri.startsWith("file://") ||
+                item.imageUri.startsWith("content://") ||
+                item.imageUri.startsWith("data:image/")))
+              ? item.imageUri
+              : (typeof item.content === "string" &&
+                  (item.content.startsWith("file://") ||
+                    item.content.startsWith("content://") ||
+                    item.content.endsWith(".png") ||
+                    item.content.endsWith(".jpg") ||
+                    item.content.endsWith(".jpeg") ||
+                    item.content.endsWith(".webp")))
+                ? item.content
+                : null;
+
+          let imageUriToUpload = "";
+
+          if (directImageUri) {
+            console.log(
+              `[AccountProfile] 🖼️ [1/3] Item "${item.id}" is a direct image. Uploading directly to Cloudinary...`,
+            );
+            imageUriToUpload = directImageUri;
+          } else {
+            console.log(
+              `[AccountProfile] 🎨 [1/3] Rendering QR in PNG format for "${item.title || item.id}"...`,
+            );
+            setCurrentSyncItem(item);
+            await new Promise((resolve) => setTimeout(resolve, 180));
+
+            if (syncQrRef.current) {
+              imageUriToUpload = await captureRef(syncQrRef.current, {
+                format: "png",
+                quality: 1,
+                result: "data-uri",
+              });
+            }
+          }
+
+          if (imageUriToUpload) {
+            try {
+              const cldResult = await uploadQrToCloudinary(
+                imageUriToUpload,
+                item.title || (item.type === "scan" ? "Scanned Code" : "QR Code"),
+              );
+
+              console.log(
+                `[AccountProfile] ✅ [1/3] Cloudinary upload success! CDN URL: ${cldResult.secureUrl}`,
+              );
+
+              const changes = {
+                cloudUrl: cldResult.secureUrl,
+                publicId: cldResult.publicId,
+                cloudAssetId: cldResult.assetId,
+                cloudUploadedAt: cldResult.createdAt,
+              };
+
+              dispatch(
+                updateHistoryItem({
+                  id: item.id,
+                  changes,
+                }),
+              );
+
+              workingHistory = workingHistory.map((h) =>
+                h.id === item.id ? { ...h, ...changes } : h,
+              );
+            } catch (cldErr: any) {
+              console.warn(
+                `[AccountProfile] ⚠️ Cloudinary upload skipped for item "${item.id}":`,
+                cldErr?.message || cldErr,
+              );
+            }
+          }
+        }
+
+        setCurrentSyncItem(null);
+        console.log(
+          `[AccountProfile] ✅ [1/3] Cloudinary uploads complete. All assets hosted on Cloudinary CDN.`,
+        );
+      } else {
+        console.log(
+          `[AccountProfile] ℹ️ [1/3] All items already hosted on Cloudinary or none to upload.`,
+        );
+      }
+
+      // Step 2: Sync records with Cloudinary asset links into Firestore (not storing raw image data)
+      setSyncStatusText("Saving records and Cloudinary URLs to Firestore...");
       console.log(
-        `[AccountProfile] 🔄 Merging ${syncedItems.length} cloud records into Redux store...`,
+        `[AccountProfile] ⏳ [2/3] Uploading records with Cloudinary asset links to Firestore...`,
+      );
+
+      const syncedItems = await syncGuestHistoryToCloud(user.uid, workingHistory);
+
+      // Step 3: Merge back into Redux store
+      console.log(
+        `[AccountProfile] 🔄 [3/3] Merging ${syncedItems.length} records into Redux store...`,
       );
       dispatch(mergeHistoryItems(syncedItems));
+
       console.log(
-        `[AccountProfile] ✅ Cloud sync completed successfully (${syncedItems.length} total cloud records).`,
+        `[AccountProfile] ✅ [3/3] Cloud sync completed successfully (${syncedItems.length} records).`,
       );
 
       Alert.alert(
         "Cloud Sync Complete",
-        `Your QR history (${syncedItems.length} records) is now safely synced with Firestore.`,
+        `Your QR codes are safely hosted on Cloudinary in PNG format, and their secure CDN links are stored in Firestore.`,
       );
     } catch (err: any) {
       console.error(
@@ -89,7 +242,9 @@ export default function AccountProfileScreen() {
         err?.message || "Could not complete cloud synchronization.",
       );
     } finally {
+      setCurrentSyncItem(null);
       setIsSyncing(false);
+      setSyncStatusText("");
       console.log("[AccountProfile] 🏁 Sync operation finished.");
     }
   };
@@ -346,6 +501,12 @@ export default function AccountProfileScreen() {
                 </>
               )}
             </Pressable>
+
+            {isSyncing && syncStatusText ? (
+              <Text className="mt-2.5 text-center text-xs font-semibold text-violet-600 dark:text-violet-400">
+                {syncStatusText}
+              </Text>
+            ) : null}
           </View>
 
           {/* Account Lifecycle */}
@@ -385,6 +546,41 @@ export default function AccountProfileScreen() {
           </View>
         </View>
       </ScrollView>
+
+      {/* Off-screen QR rendering canvas for generating PNG format assets for Cloudinary upload during sync */}
+      <View
+        pointerEvents="none"
+        style={{
+          position: "absolute",
+          top: -2000,
+          left: 0,
+          width: 250,
+          height: 250,
+        }}
+        collapsable={false}
+      >
+        {currentSyncItem ? (
+          <View
+            ref={syncQrRef}
+            collapsable={false}
+            style={{
+              width: 240,
+              height: 240,
+              backgroundColor: currentSyncItem.backgroundColor || "#FFFFFF",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <QRCode
+              value={currentSyncItem.content.trim() || " "}
+              size={200}
+              color={currentSyncItem.foregroundColor || "#111827"}
+              backgroundColor={currentSyncItem.backgroundColor || "#FFFFFF"}
+              ecl={currentSyncItem.ecl || "M"}
+            />
+          </View>
+        ) : null}
+      </View>
     </SafeAreaView>
   );
 }

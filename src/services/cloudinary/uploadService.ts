@@ -66,14 +66,24 @@ export async function uploadQrToCloudinary(
   const formData = new FormData();
 
   if (localUri.startsWith("data:")) {
-    // Direct Data-URI payload
+    // Direct Data-URI payload (PNG format QR snapshot)
     formData.append("file", localUri);
   } else {
-    // Local filesystem URI (React Native FormData file format)
-    const fileName = `${signData.publicId || title || "qr_code"}.png`;
+    // Direct image file URI (React Native FormData format)
+    const lower = localUri.toLowerCase();
+    const isJpeg = lower.endsWith(".jpg") || lower.endsWith(".jpeg");
+    const isWebp = lower.endsWith(".webp");
+    const mimeType = isJpeg ? "image/jpeg" : isWebp ? "image/webp" : "image/png";
+    const extension = isJpeg ? "jpg" : isWebp ? "webp" : "png";
+    const cleanTitle = (signData.publicId || title || "asset").replace(
+      /[^a-zA-Z0-9_-]/g,
+      "_",
+    );
+    const fileName = `${cleanTitle}.${extension}`;
+
     formData.append("file", {
       uri: localUri,
-      type: "image/png",
+      type: mimeType,
       name: fileName,
     } as any);
   }

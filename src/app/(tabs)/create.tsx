@@ -6,7 +6,12 @@ import { Alert, Pressable, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
-import { addHistoryItem, type QRHistoryItem } from "@/store/slices/historySlice";
+import {
+  addHistoryItem,
+  updateHistoryItem,
+  type QRHistoryItem,
+} from "@/store/slices/historySlice";
+import { uploadQrToCloudinary } from "@/services/cloudinary/uploadService";
 import { saveQrToCloudFirestore } from "@/services/firebase/historyService";
 
 import {
@@ -53,7 +58,7 @@ export default function CreateScreen() {
   const qrRef = useRef<View>(null);
   const dispatch = useAppDispatch();
   const user = useAppSelector((state) => state.auth.user);
-  const { saveQr, shareQr } = useQrExport(qrRef);
+  const { saveQr, shareQr, captureQr } = useQrExport(qrRef);
 
   const [selectedType, setSelectedType] = useState<CreatorType>("url");
 
@@ -136,18 +141,40 @@ export default function CreateScreen() {
     console.log(`[CreateScreen] 💾 Saved QR item "${newItem.id}" to local Redux store.`);
 
     if (user?.uid) {
-      console.log(`[CreateScreen] ⏳ Syncing creation "${newItem.id}" to Firestore (users/${user.uid}/history)...`);
-      saveQrToCloudFirestore(user.uid, newItem)
+      console.log(`[CreateScreen] ⏳ Uploading QR image to Cloudinary CDN for user "${user.uid}"...`);
+      captureQr("data-uri")
+        .then((imageUri) => uploadQrToCloudinary(imageUri, newItem.title || "QR Code"))
+        .then((cldResult) => {
+          console.log(`[CreateScreen] ✅ Cloudinary upload complete! URL: ${cldResult.secureUrl}`);
+          dispatch(
+            updateHistoryItem({
+              id: newItem.id,
+              changes: {
+                cloudUrl: cldResult.secureUrl,
+                publicId: cldResult.publicId,
+                cloudAssetId: cldResult.assetId,
+                cloudUploadedAt: cldResult.createdAt,
+              },
+            }),
+          );
+          return saveQrToCloudFirestore(user.uid, {
+            ...newItem,
+            cloudUrl: cldResult.secureUrl,
+            publicId: cldResult.publicId,
+            cloudAssetId: cldResult.assetId,
+            cloudUploadedAt: cldResult.createdAt,
+          });
+        })
         .then(() => {
-          console.log(`[CreateScreen] ✅ Creation "${newItem.id}" synced to Firestore.`);
+          console.log(`[CreateScreen] ✅ Firestore document saved with Cloudinary asset link.`);
         })
         .catch((err) => {
-          console.warn("[CreateScreen] ⚠️ Failed to auto-sync to Firestore:", err?.message || err);
+          console.warn(`[CreateScreen] ⚠️ Cloudinary auto-upload skipped:`, err?.message || err);
+          saveQrToCloudFirestore(user.uid, newItem).catch(() => {});
         });
     }
 
-    console.log(`[CreateScreen] ℹ️ Cloudinary asset: Image is not auto-uploaded on creation. Open this item from History tab to upload its PNG to Cloudinary CDN.`);
-    Alert.alert("Saved", "Your QR code has been added to history.");
+    Alert.alert("Saved", "Your QR code has been added to history and cloud storage.");
   }
 
   return (
