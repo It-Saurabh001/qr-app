@@ -1,6 +1,6 @@
 # Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
 
-# dependencies
+# Dependencies
 node_modules/
 
 # Expo
@@ -9,45 +9,73 @@ dist/
 web-build/
 expo-env.d.ts
 
-# Native
+# Native & Build Artifacts
 .kotlin/
 *.orig.*
 *.jks
+*.keystore
 *.p8
 *.p12
 *.key
+*.pem
 *.mobileprovision
+local.properties
+.gradle/
+/ios
+/android
 
 # Metro
 .metro-health-check*
 
-# debug
+# Debug & Logs
 npm-debug.*
 yarn-debug.*
 yarn-error.*
+pnpm-debug.*
+firebase-debug.log*
+firestore-debug.log*
+ui-debug.log*
 
-# macOS
-.DS_Store
-*.pem
-
-# local env files
+# Environment & Secret Configuration Files
 .env
+.env.*
 .env*.local
+*.env
+.dev.vars
+.dev.vars.*
 
-# typescript
-*.tsbuildinfo
+# Cloudflare Wrangler
+.wrangler/
 
-example
-
-# generated native folders
-/ios
-/android
-
-#firebase credential
+# Firebase & Cloud Credentials
 google-services.json
 GoogleService-Info.plist
+*serviceAccount*.json
+*adminsdk*.json
 
-#cloude functions runtime exclusion
+# Cloud Functions Exclusions
 functions/node_modules/
 functions/lib/
 functions/.env
+functions/.env.*
+
+# TypeScript
+*.tsbuildinfo
+
+# IDE & Editor Settings
+.vscode/
+.idea/
+.claude/
+*.swp
+*.swo
+
+# OS System Files
+.DS_Store
+Thumbs.db
+Desktop.ini
+ehthumbs.db
+
+# Temporary & Scratch Files
+scratch/
+*.tmp
+example

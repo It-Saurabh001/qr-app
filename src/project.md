@@ -1,594 +1,187 @@
-# QR Studio — Development Roadmap
+# QR Studio — Architecture, Features & Milestone Roadmap
 
 **Project:** QR Studio  
-**Platform:** React Native + Expo + TypeScript  
-**Navigation:** Expo Router  
-**Styling:** NativeWind v4  
-**State Management:** Redux Toolkit  
-**Local Guest Session:** Expo SecureStore  
-**Local Preferences:** AsyncStorage / Redux Persist, as appropriate  
-**Backend:** React Native Firebase  
-**Database:** Cloud Firestore  
-**QR Image Storage:** Cloudinary through signed Cloud Functions  
-**AI:** Gemini through Cloud Functions
+**Platform:** React Native + Expo (SDK 57) + TypeScript  
+**Routing:** Expo Router (File-based navigation)  
+**Styling:** NativeWind (Tailwind CSS v4)  
+**State Architecture:** Redux Toolkit + Redux Persist  
+**Local Guest Engine:** Expo SecureStore + AsyncStorage  
+**Cloud Authentication:** React Native Firebase Auth (Email/Password + Google Sign-In)  
+**Cloud Database:** Cloud Firestore (User-isolated namespaces)  
+**Serverless Signature Gateway:** Cloudflare Worker (`/api/cloudinary/sign`)  
+**CDN Image Storage:** Cloudinary (Signed PNG format QR codes & direct image uploads)  
+**AI Intelligence:** Gemini-ready security scoring and smart prompt creator  
 
 ---
 
-## 1. Project Rules
+## 1. Architectural Model & How It Works
 
-1. Inspect existing files before modifying them.
-2. Reuse existing screens, routes, components, and configuration wherever possible.
-3. Do not create duplicate screens or parallel navigation systems.
-4. Complete and test each stage before moving to the next.
-5. Keep Firebase SDK calls inside `src/services/`.
-6. Guest mode must work without an internet connection.
-7. Never treat a guest session as an authenticated Firebase user.
-8. Preserve local data until a migration or upload is confirmed successful.
-9. Run TypeScript checks and test affected navigation after each stage.
-10. Do not implement all features in one large change.
+QR Studio is built on an **offline-first, zero-trust cloud architecture**. It bridges offline convenience with enterprise-grade cloud synchronization:
 
-## 2. Overall Development Flow
+### 1. Offline-First Guest Engine
+- **No Mandatory Login:** Users can immediately launch and operate the application as a Guest without network connectivity or account creation.
+- **Hardware-Backed Session Storage:** The guest session marker is stored in device hardware keystores using `expo-secure-store`.
+- **Local Data Persistence:** All generated and scanned QR records, favorites, and user preferences are saved locally in Redux and synchronized with `AsyncStorage`.
+- **Offline Parity:** Camera scanning, barcode decoding, multi-format QR generation, SVG/PNG rendering, and history filtering function 100% offline.
 
-```text
-STAGE 0 — Audit Existing Project
-        |
-        v
-STAGE 1 — App Entry + Onboarding + Welcome
-        |
-        v
-STAGE 2 — Sign In / Sign Up UI
-        |
-        v
-STAGE 3 — Offline Guest Session + Session Restoration
-        |
-        v
-STAGE 4 — Home Screen + Main Navigation
-        |
-        v
-STAGE 5 — QR Scanner + Result Screen
-        |
-        v
-STAGE 6 — QR Creator + Preview + Export
-        |
-        v
-STAGE 7 — Local History + Favorites + Search
-        |
-        v
-STAGE 8 — Firebase Email Authentication
-        |
-        v
-STAGE 9 — Guest Data Migration + Firestore Sync
-        |
-        v
-STAGE 10 — Cloudinary Signed Uploads
-        |
-        v
-STAGE 11 — AI Scan Analysis + Smart Create
-        |
-        v
-STAGE 12 — Settings + Account Management
-        |
-        v
-STAGE 13 — Testing + Security + Performance
-        |
-        v
-STAGE 14 — Release Preparation
-```
+### 2. Dual Authentication & Identity Flow
+- **Firebase Native Auth:** Supports email/password authentication and native Google Sign-In (`@react-native-google-signin/google-signin`).
+- **Session Decoupling:** Authentication state operates independently from local guest sessions, preventing auth listeners from prematurely ejecting offline guests.
+- **Data Protection Guarantee:** Local guest records are never wiped or overwritten when authenticating. Users are guided through a migration flow to safely upload offline history into their cloud profile.
+
+### 3. Serverless Cloudflare Worker Gateway
+- **Zero Client Secrets:** The mobile application contains no Cloudinary API secrets or backend administrative credentials.
+- **ID Token Verification:** When an authenticated user triggers a cloud upload, the app sends their Firebase ID token (`Authorization: Bearer <token>`) to the Cloudflare Worker endpoint (`/api/cloudinary/sign`).
+- **Cryptographic Signature Generation:** The Worker validates the token against Google's public keys, enforces user folder scoping (`qr-app/${user.uid}/`), and generates a timestamped SHA signature for direct client-to-Cloudinary upload.
+- **Unauthorized Request Rejection:** Unauthenticated or expired requests are rejected with status 401, preventing unauthorized storage consumption.
+
+### 4. Cloudinary Signed Upload Pipeline
+- **High-Definition PNG Capture:** For QR creations and scanned codes, the app renders a high-definition snapshot using an offscreen canvas (`react-native-view-shot` + `react-native-qrcode-svg`) and captures it in PNG format.
+- **Direct Image Uploads:** For codes scanned from gallery photos, the original source image is uploaded directly to Cloudinary.
+- **Direct Signed Multipart Upload:** The client uploads the asset directly to Cloudinary's upload API using multipart FormData signed by the Worker.
+- **Global CDN Delivery:** Returns secure HTTPS URLs (`secure_url`) and unique public IDs for global delivery.
+
+### 5. Cloud Firestore Database Synchronization
+- **Metadata-Only Cloud Storage:** The user's cloud document store (`users/{uid}/history/{itemId}`) stores only lightweight JSON metadata and Cloudinary CDN links (`cloudUrl`, `publicId`, `cloudAssetId`, `title`, `content`, `format`, `createdAt`).
+- **Zero Heavy Payload in Database:** Raw binary files or large base64 strings are **never** stored in Firestore, keeping database reads/writes lightning-fast, highly cost-effective, and within strict quota limits.
+- **Bidirectional Merge:** When syncing, local history and remote Firestore collections merge seamlessly using deterministic IDs and timestamps, preventing duplicate entries.
 
 ---
 
-## STAGE 0 — Audit Existing Project
+## 2. Core Features Breakdown
 
-### Objective
-Understand the existing structure before making changes.
+### 📷 Scanning Engine
+- **Live Viewfinder:** `expo-camera` with a smooth, continuous scanning reticle and torch control.
+- **Format Decoding:** Supports QR codes and 11 barcode formats (EAN-13, EAN-8, Code 128, UPC-A, UPC-E, PDF417, Aztec, DataMatrix, Code 39, Code 93, Codabar).
+- **Gallery Import:** Scan barcodes and QR codes from photos and screenshots in the device media library via `expo-image-picker`.
+- **Instant Actions:** Context-aware actions for detected URLs (browser opening), Wi-Fi (SSID parsing & password copy), phone dialers, SMS, and geolocation.
+- **Automatic Cloud Backup:** For logged-in users, scanned codes and gallery images automatically back up to Cloudinary and sync their CDN link to Firestore.
 
-### Tasks
-- Inspect `package.json`, `app.json`, `app.config.ts`, `tsconfig.json` and navigation files.
-- Inspect `app/`, `src/`, `assets/` and existing authentication logic.
-- Identify existing routes, Redux store, slices, services and reusable UI components.
-- Check whether onboarding, welcome, sign-in and sign-up screens already exist.
-- Identify duplicate files, incorrect imports and conflicting redirect logic.
-- Record installed package versions and existing TypeScript errors.
+### 🎨 Creation Studio
+- **8 Payload Templates:** Web URL, Plain Text, Wi-Fi Network, Contact (vCard), Email, Phone Number, SMS, and Geolocation.
+- **Styling Controls:** Foreground color picker, background color picker, and 4 Error Correction Levels (L, M, Q, H).
+- **Export & Share:** Export clean PNG images to device storage or share via the native sharing sheet.
+- **Creation Details Screen:** Dedicated detail screen (`/creation/[id]`) showing the high-resolution QR, Cloudinary CDN link card (with copy & browser buttons), re-upload trigger, and deletion with cloud record cleanup.
 
-### Exit Criteria
-- Existing architecture and route structure are understood.
-- Required changes are listed.
-- No files are deleted or rewritten without a clear reason.
+### 📂 History, Search & Favorites
+- **Offline Persistence:** All scans and creations are recorded locally with ISO timestamps.
+- **Favorites Organization:** Bookmark critical codes for instant access.
+- **Real-Time Filtering & Search:** Filter by type (`All`, `Scanned`, `Created`, `Favorites`) and search query.
+- **Cloud Indicators:** Visual status badges distinguish items hosted on Cloudinary and synced with Firestore.
+- **Bulk Operations:** Clear all records with confirmation guards and cloud cleanup.
 
----
+### 👤 Account, Sync & Lifecycle Management
+- **Unified Cloud Sync:** Single "Sync Cloud Data Now" action in Account Profile (`/account/profile`) with clean step-by-step progress logging.
+- **Offscreen PNG Rendering:** Automatically catches any historical records missing Cloudinary CDN links, renders their PNG QR codes offscreen, uploads them to Cloudinary, and saves CDN links to Firestore.
+- **Data Migration:** Dedicated migration flow (`/migrate`) transferring guest offline history into a new user account.
+- **Account Deletion Lifecycle:** Complete self-service account deletion (`deleteUserAccount`) that deletes user records and signs out safely.
 
-## STAGE 1 — App Entry, Onboarding and Welcome
-
-### Objective
-Complete the first-launch user experience.
-
-### User Flow
-
-```text
-App Launch
-    |
-    v
-Check Onboarding Completion
-    |
-    +-- Not Completed --> Onboarding Slides
-    |                         |
-    |                         v
-    |                       Welcome
-    |
-    +-- Completed ----------> Welcome
-                              |
-                              v
-                         Get Started
-                              |
-                              v
-                         Sign In Screen
-```
-
-### Tasks
-- Verify `app/index.tsx` and onboarding-completion logic.
-- Finish the existing `app/onboarding.tsx`.
-- Persist onboarding completion so slides do not appear on every launch.
-- Update the existing `app/welcome.tsx`.
-- Keep Welcome's primary action as **Get Started**.
-- Route Get Started to `/(auth)/sign-in`.
-- Verify Skip and Get Started navigation.
-- Check that app restart does not unnecessarily repeat onboarding.
-
-### Exit Criteria
-- First launch displays onboarding.
-- Completing or skipping onboarding leads to Welcome.
-- Returning users do not see onboarding again.
-- No redirect loop or missing-route error occurs.
+### 🤖 AI-Ready Intelligence Layer
+- **Smart AI Creator:** Natural language prompt processing (`/create/smart`) that understands intents (e.g. *"Create a Wi-Fi QR for guest network with password xyz"*) and auto-populates generator fields.
+- **AI Scan Analysis:** Security risk detection screen (`/ai/analyze`) evaluating phishing indicators, URL safety scores, and plain-English summaries.
 
 ---
 
-## STAGE 2 — Authentication Screens UI
+## 3. Work Done Till Yet (Completed Milestones)
 
-### Objective
-Build the authentication experience before connecting real authentication.
+### STAGE 0 — Project Audit & Architecture Setup
+- [x] Audited existing dependencies, routes, and services.
+- [x] Configured TypeScript strict typing, NativeWind v4 styling, and Expo SDK 57 compatibility.
+- [x] Established service layer boundaries (UI components never call Firebase or external APIs directly).
 
-### Required Screens
-- Sign In
-- Create Account
-- Forgot Password
+### STAGE 1 — App Entry, Onboarding & Welcome Experience
+- [x] First-launch onboarding slides with completion persistence via AsyncStorage.
+- [x] Welcome screen with "Get Started" and "Continue as Guest" entry points.
+- [x] Returning user routing preventing repeated onboarding screens.
 
-### Sign In Screen Actions
-- Sign In
-- Create Account
-- Continue as Guest
-- Forgot Password
+### STAGE 2 — Authentication Screens UI
+- [x] Sign In screen with email/password and Google Sign-In button.
+- [x] Create Account screen with client-side form validation.
+- [x] Password Reset screen with error handling and keyboard-aware scroll views.
 
-### Tasks
-- Reuse `app/(auth)/sign-in.tsx` if it already exists.
-- Create or update sign-up and password-reset screens only as needed.
-- Add form validation and loading/error states.
-- Verify back navigation and keyboard behavior.
-- Keep authentication service logic separate from UI components.
-- Do not make the guest button dependent on Firebase.
+### STAGE 3 — Offline Guest Session Management
+- [x] Implemented hardware-backed guest session marker in `src/services/auth/localGuestSession.ts` using `expo-secure-store`.
+- [x] Built session restoration on app launch in `src/app/index.tsx`.
+- [x] Protected routes differentiating between Guest, Authenticated, and Logged-Out states.
 
-### Exit Criteria
-- All authentication screens open correctly.
-- Form validation works.
-- Navigation works without Firebase credentials or a network connection.
-- Guest entry remains available.
+### STAGE 4 — Main Navigation & Dashboard
+- [x] Implemented bottom tab navigation (`Scan`, `Create`, `History`) using Expo Router.
+- [x] Built responsive headers, status bar theming, and dark mode support.
+- [x] Added quick action cards and smooth tab switching animations.
 
----
+### STAGE 5 — QR Scanner & Gallery Import
+- [x] Integrated `expo-camera` with live camera view, torch toggle, and smooth laser line animation.
+- [x] Implemented gallery photo barcode scanning with `expo-image-picker` and `Camera.scanFromURLAsync`.
+- [x] Built result cards with contextual actions (Open URL, Call, Copy, Share, Wi-Fi password copy).
+- [x] Added haptic feedback on detection and auto-save preference toggles.
 
-## STAGE 3 — Offline Guest Session
+### STAGE 6 — QR Creator Studio & Export
+- [x] Built 8 format payload generators (URL, Text, Wi-Fi, Contact, Email, Phone, SMS, Location).
+- [x] Integrated `react-native-qrcode-svg` with live visual preview.
+- [x] Added custom foreground/background color selection and error correction levels.
+- [x] Implemented high-resolution PNG export using `react-native-view-shot` and native sharing.
 
-### Objective
-Allow users to enter and reopen the app without an account or internet connection.
+### STAGE 7 — Local History, Search & Favorites
+- [x] Configured Redux Toolkit normalized entity adapter (`historySlice.ts`) for $O(1)$ updates.
+- [x] Built real-time text search and type filtering (`All`, `Scanned`, `Created`, `Favorites`).
+- [x] Added favorite toggle actions and persistent local storage.
+- [x] Implemented cloud sync indicator badges on history cards.
 
-### Storage
-Use `expo-secure-store` for the local guest-session marker.
+### STAGE 8 — Firebase Authentication Integration
+- [x] Implemented native Firebase Auth service (`authService.ts`) for email/password and Google Sign-In.
+- [x] Added token retrieval helper (`getIdToken()`) with force-refresh options.
+- [x] Integrated centralized auth listeners updating Redux auth slice without disturbing guest state.
 
-Use local application storage for guest-created QR records and scan history. Keep the guest session marker separate from history data.
+### STAGE 9 — Guest Data Migration & Firestore Sync
+- [x] Created dedicated migration screen (`/migrate`) for transferring local offline history into Firestore.
+- [x] Built batch Firestore sync service (`historyService.ts` -> `syncGuestHistoryToCloud`) with chunked batching.
+- [x] Enforced user-isolated Firestore namespaces (`users/{uid}/history/{itemId}`).
+- [x] Added deterministic ID handling to prevent duplicate records during retries.
 
-### Tasks
-- Create `src/services/auth/localGuestSession.ts`.
-- Implement starting, checking and clearing a local guest session.
-- Restore the session when the app starts.
-- Connect Continue as Guest to local session creation.
-- Route a restored guest directly to the main app.
-- Update protected-route logic to distinguish guest, authenticated, and logged-out states.
-- Ensure Firebase auth listeners cannot redirect a valid local guest to Welcome.
-- Add a logout/exit path that clears the guest marker without accidentally deleting guest history.
+### STAGE 10 — Cloudflare Worker & Cloudinary Signed Uploads
+- [x] Configured serverless Cloudflare Worker `/api/cloudinary/sign` endpoint validating Firebase ID tokens.
+- [x] Enforced user folder scoping on the Worker (`qr-app/${user.uid}/`) with zero client-side secrets.
+- [x] Built signed multipart upload service (`uploadService.ts` -> `uploadQrToCloudinary`).
+- [x] Created Creation Studio detail screen (`/creation/[id]`) displaying high-res QR, Cloudinary CDN link card, copy/open buttons, and re-upload trigger.
+- [x] Implemented cloud deletion cleanup (deleting local items removes them from Firestore).
 
-### Session States
+### STAGE 11 — AI-Ready Feature Screens
+- [x] Built Smart AI Creator screen (`/create/smart`) with natural language prompt parsing.
+- [x] Built AI Scan Analysis screen (`/ai/analyze`) with security risk scoring and plain-English code explanation.
+- [x] Established client AI service layer (`aiService.ts`) ready for backend Gemini endpoints.
 
-```text
-                 App Starts
-                     |
-                     v
-               Restore Session
-                     |
-          +----------+----------+
-          |          |          |
-          v          v          v
-     Auth User    Guest      No Session
-          |          |          |
-          v          v          v
-         Home       Home    Welcome / Sign In
-```
+### STAGE 12 — Account & Settings Management Hub
+- [x] Enhanced Settings screen (`/settings`) with deep links to Profile, Migration, and Smart Creator.
+- [x] Built Account & Cloud Settings screen (`/account/profile`) with user info, cloud indicators, and UID copying.
+- [x] Implemented self-service account deletion (`deleteUserAccount`) in `accountService.ts`.
+- [x] Built 404 fallback route (`+not-found.tsx`) for unmatched URLs.
 
-### Exit Criteria
-- Guest mode works with the internet disabled.
-- Closing and reopening the app restores the guest session.
-- No Firebase anonymous sign-in occurs.
-- Guest history survives normal app restarts.
-- Firebase auth-state changes do not incorrectly log out a guest.
-
----
-
-## STAGE 4 — Home Screen and Main Navigation (Completed & Verified)
-
-### Objective
-Build the primary app shell with a modern 3-tab layout and responsive constraints across Android and iOS devices (smartphones, foldables, and tablets).
-
-### Main Navigation (3 Bottom Tabs)
-1. **Home Tab** (`/(tabs)/index`):
-   - Offline Guest status indicator and personalized greeting.
-   - Live guest metrics bar (Scanned, Created, Favorites count from Redux history).
-   - Quick Actions grid (Scan QR, Create QR, History, Preferences).
-   - Recent Activity feed (latest items with format badges, copy, and favorite state).
-2. **Scan QR Tab** (`/(tabs)/scan`):
-   - Center elevated circular floating button (`width: 64`, `height: 64`, `borderRadius: 32`, `top: -18`).
-   - `#7C3AED` accent background with theme cutout border and white QR icon.
-3. **Create QR Tab** (`/(tabs)/create`):
-   - Direct access to the offline multi-format QR code generator.
-
-### Hidden Subroutes in `(tabs)`
-- **History Screen** (`/(tabs)/history`): Hidden from the bottom bar (`href: null`), accessible via Home Quick Actions and Recent Activity. Includes header back button (`router.back()`).
-- **Settings / Preferences Screen** (`/(tabs)/settings`): Hidden from the bottom bar (`href: null`), accessible via Home header settings button. Includes header back button (`router.back()`).
-
-### Responsive Layout Pattern
-- All screens wrapped in responsive container `w-full max-w-2xl self-center` (and `max-w-md` for auth screens) to ensure optimal readability on tablets (iPad, Galaxy Tab) and phones.
-- All scroll views specify `paddingBottom: 110` so elevated floating bottom bar never obstructs content.
-
-### Exit Criteria
-- [x] Exactly 3 primary bottom tabs visible (Home, Center Elevated Scan, Create QR).
-- [x] History and Settings accessible as subroutes with back navigation.
-- [x] Guest users can access all permitted local features without an internet connection.
-- [x] Responsive layout verified across mobile, foldable, and tablet form factors.
+### STAGE 13 — Security Hardening, Offscreen PNG Rendering & CDN Link Fix
+- [x] Fixed Firestore document issue where scanned codes lacked `cloudUrl`:
+  - Updated sync loop to process all items missing CDN links (creations and scans).
+  - Added offscreen canvas with `QRCode` and `captureRef` to generate PNG format QR snapshots for scanned codes.
+  - Added direct image upload for gallery scans.
+  - Ensured only Cloudinary CDN URLs (`cloudUrl`) and metadata are stored in Firestore—never raw base64 or heavy image bytes.
+- [x] Added standardized one-liner console logging throughout all async pipelines for clear tracing.
+- [x] Hardened `.gitignore` to protect environment files, Wrangler dev secrets, Firebase credentials, and IDE files.
+- [x] Passed TypeScript typecheck (`npx tsc --noEmit`) and ESLint (`npm run lint`) with zero errors.
 
 ---
 
-## STAGE 5 — QR Scanner and Result Screen (Completed & Verified)
+## 4. Security Rules & Development Standards
 
-### Objective
-Scan QR codes and common supported barcodes with live camera or gallery import, offering contextual actions and offline persistence.
-
-### Tasks & Features
-- Integrated `expo-camera` (`CameraView`) supporting 13 barcode types (`qr`, `ean13`, `code128`, `upc_a`, `datamatrix`, etc.).
-- Camera permission flow with informative grant screen.
-- Smooth native-driver animated scanning reticle with moving laser line (60 FPS).
-- Torch toggle with active feedback state.
-- Gallery scanning via `expo-image-picker` and `Camera.scanFromURLAsync`.
-- Parsed payload classification and contextual actions:
-  - **URL**: Safe "Open in Browser" (with external link confirmation alert), "Copy", "Share".
-  - **Wi-Fi**: Parsed SSID and Password display, "Copy Password", "Share".
-  - **Phone / Email / SMS / Geo**: Direct dialer, email composer, SMS, or map launcher.
-  - **Plain Text / Codes**: One-tap copy to clipboard and native sharing.
-- Auto-save preference respect: automatically records to Redux history, or allows manual saving when auto-save is disabled.
-- Dedicated detail screen `src/app/scan-result/[id].tsx` connected to Redux history items.
-
-### Exit Criteria
-- [x] Live camera scanning works offline on Android and iOS devices.
-- [x] Gallery image scanning decodes QR and barcodes reliably.
-- [x] External links require user confirmation before opening.
-- [x] Scans save to local history in guest mode.
+1. **Zero Client Secrets:** The mobile client never receives or stores Cloudinary API secrets or Firebase Admin keys.
+2. **User-Isolated Storage:** All Cloudinary assets are scoped to `qr-app/${user.uid}/`, and all Firestore documents are scoped to `users/{uid}/history/{itemId}`.
+3. **Database Payload Discipline:** Firestore documents store only lightweight JSON metadata and HTTPS CDN links. Raw image binaries and base64 strings are strictly forbidden from database storage.
+4. **Offline First:** Every core utility (scanning, decoding, generation, export, local history) must remain fully operational without network access.
+5. **Separation of Concerns:** UI components must never call Firebase or external HTTP endpoints directly; all operations are routed through `src/services/`.
+6. **Codebase Health:** Every change must validate with `npx tsc --noEmit` and `npm run lint`.
 
 ---
 
-## STAGE 6 — QR Creator and Export (Completed & Verified)
+## 5. Upcoming Roadmap (Next Steps)
 
-### Objective
-Generate high quality QR codes locally with rich styles, error correction, and multiple export formats.
-
-### Supported Offline QR Types (8 Formats)
-- URL
-- Plain text
-- Wi-Fi (SSID, Password, Security type, Hidden network)
-- Contact / vCard (Name, Phone, Email, Organization)
-- Email (Recipient, Subject, Message body)
-- SMS (Phone number, Message body)
-- Phone (Dialer number)
-- Geographic location (Latitude, Longitude)
-
-### Customization & Export
-- Live SVG preview using `react-native-qrcode-svg`.
-- Custom foreground and background hex colors.
-- Error Correction Level (ECL) selector: Low (7%), Medium (15%), Quartile (25%), High (30%).
-- Save PNG to device photo library via `expo-media-library`.
-- Native sharing via `expo-sharing`.
-- One-tap "Save to History" action recording creation in local Redux/AsyncStorage.
-
-### Exit Criteria
-- [x] All 8 QR types generate valid, scannable QR payloads offline.
-- [x] Live SVG preview updates reactively.
-- [x] Error correction and custom colors function without errors.
-- [x] PNG export and native share sheet work on physical devices.
-- [x] Creations are preserved in local guest history.
-
----
-
-## STAGE 7 — Local History, Favorites and Search (Completed & Verified)
-
-### Objective
-Provide full offline data persistence, organization, and search for guests without requiring an account or cloud backend.
-
-### Features
-- Redux Toolkit `createEntityAdapter` managing `historySlice` items (`id`, `content`, `format`, `type: 'scan' | 'create'`, `title`, `isFavorite`, `createdAt`).
-- Persisted locally to AsyncStorage via `redux-persist` (`whitelist: ['settings', 'history']`).
-- Search bar with live content/format/title filtering and clear button.
-- Filter chips: All, Scanned, Created, Favorites.
-- Star/favorite toggle with instant persistence.
-- Delete individual items with destructive confirmation alert.
-- "Clear All" history action with safety confirmation.
-- One-tap copy to clipboard with haptic feedback.
-- Back navigation button returning to Home screen.
-- **QR Preview Box Modal**: Interactive pop-up dialog rendering the scannable SVG QR code with custom colors and error-correction levels, full scrollable input content box with one-tap copy, and direct export options ("Save PNG" to gallery and "Share QR").
-- Tappable history cards with prominent "Tap to view QR" badges and dedicated "View QR" action buttons.
-
-### Exit Criteria
-- [x] Scans and creations persist across complete app restarts.
-- [x] Search, filter, favorite, and delete operate 100% offline.
-- [x] Tapping any history card or "View QR" button opens a visual QR modal showing the scannable code and input content.
-- [x] Guest history remains isolated from authentication sessions until explicit migration.
-
----
-
-## STAGE 8 — Firebase Email Authentication
-
-### Objective
-Connect real account creation and sign-in after the main local experience is stable.
-
-### Tasks
-- Verify the development build supports React Native Firebase.
-- Configure Firebase Auth.
-- Implement email/password sign-up and sign-in.
-- Implement password reset and sign-out.
-- Create a centralized auth service.
-- Keep SDK calls inside `src/services/`.
-- Update auth state without confusing guest sessions with Firebase users.
-- Add loading, network-error and authentication-error handling.
-
-### Exit Criteria
-- Real users can create accounts and sign in.
-- Password reset works.
-- Authenticated sessions restore correctly.
-- Guest mode still works independently and offline.
-
----
-
-## STAGE 9 — Guest Data Migration and Firestore Sync
-
-### Objective
-Allow a guest to create an account without losing local history.
-
-### Migration Flow
-
-```text
-Guest Uses App
-      |
-      v
-Local History Accumulates
-      |
-      v
-User Signs In / Creates Account
-      |
-      v
-Read and Validate Local Records
-      |
-      v
-Upload Records to User's Firestore Namespace
-      |
-      v
-Verify Successful Writes
-      |
-      v
-Mark Records as Synced
-      |
-      v
-Keep Local Copy Until Safe to Clean Up
-```
-
-### Tasks & Deliverables
-- [x] Guest Data Migration Screen: `src/app/migrate.tsx` for validating and uploading local offline history directly to Firestore.
-- [x] Firestore Batch Sync Service: `src/services/firebase/historyService.ts` (`syncGuestHistoryToCloud`).
-- [x] Post sign-in & sign-up migration redirect: automatic detection of local guest items directing to `/migrate`.
-- Associate records with the correct account namespace (`users/{uid}/history`).
-- Prevent duplicate uploads during retries with deterministic IDs.
-- Keep local records until successful migration is confirmed.
-
-### Exit Criteria
-- [x] Guest records migrate to the correct account.
-- [x] Local guest data is never destroyed on network error.
-- [x] Users can skip migration and continue to app seamlessly.
-- Repeated retries do not create duplicates.
-- Failed uploads do not destroy local records.
-- User A cannot access user B's data.
-- History works offline and synchronizes after connectivity returns.
-
----
-
-## STAGE 10 — Cloudinary Signed Uploads (Completed & Verified)
-
-### Objective
-Store generated QR PNG images in Cloudinary securely using server-signed upload parameters and sync metadata to Firestore.
-
-### Current Status: Working & Fully Verified
-- **Cloudflare Worker Signing**: Live `/api/cloudinary/sign` endpoint validates Firebase ID tokens (`Authorization: Bearer <token>`) and returns cryptographic signature, API key, timestamp, and folder. Rejects unauthenticated/invalid requests with 401.
-- **User-Specific Isolation**: Enforces user folder scoping (`qr-app/${user.uid}`) on the worker. User A cannot write to User B's Cloudinary storage.
-- **Direct Signed Upload**: High-resolution QR PNG images captured via `react-native-view-shot` (`data-uri` / `tmpfile`) are uploaded directly to Cloudinary's upload API using multipart form data.
-- **Firestore Metadata Integration**: Cloudinary `secure_url`, `public_id`, `asset_id`, and `created_at` timestamp are persisted to `users/{uid}/history/{itemId}` in Firestore and synced with local Redux history.
-- **Creation Studio UI**: `src/app/creation/[id].tsx` provides real-time upload progress, displays the Cloudinary CDN link card with "Copy CDN Link" and "Open in Browser", and provides re-upload capability.
-- **Deletion & Cleanup Flow**: Deleting a creation cleans up the local Redux state and deletes the corresponding Firestore record from `users/{uid}/history/{id}`.
-- **Zero Client Secrets**: Cloudinary API secret is kept exclusively on the Cloudflare Worker server; the React Native app never receives or stores the secret.
-- **Guest Mode Preservation**: Offline guest mode remains 100% functional, local, and unaffected.
-
-### Tasks & Deliverables Implemented
-- [x] Worker Signing Integration: `src/services/api/workerAuthService.ts` (`getCloudinaryUploadSignature` & `CloudinarySignResponse`).
-- [x] Signed Cloudinary Upload Service: `src/services/cloudinary/uploadService.ts` (`uploadQrToCloudinary` using live worker signature and `getIdToken()`).
-- [x] QR Export Hook Enhancement: `src/features/creator/useQrExport.ts` (exports `captureQr` with `data-uri` option).
-- [x] Redux Cloud Metadata Support: `src/store/slices/historySlice.ts` (`cloudUrl`, `publicId`, `cloudAssetId`, `cloudUploadedAt`, and `updateHistoryItem` action).
-- [x] Firestore Sync & Cleanup Service: `src/services/firebase/historyService.ts` (`saveQrToCloudFirestore`, `updateQrCloudinaryMetadata`, `deleteQrFromCloudFirestore`).
-- [x] Creation Detail Screen Integration: `src/app/creation/[id].tsx` (high-res capture, live upload, CDN link display, copy/open links, Firestore sync, delete cleanup).
-- [x] History Screen Cloud Badges & Deletion: `src/app/(tabs)/history.tsx` (shows "Cloud" sync badge and cleans up cloud Firestore records on item delete or clear all).
-- [x] Creator Screen Cloud Auto-Sync: `src/app/(tabs)/create.tsx` (auto-syncs created items to user's Firestore namespace when authenticated).
-
-### What Remains
-- STAGE 11: AI Analysis and Smart Create (server-side Gemini endpoints, App Check, quota protection).
-- STAGE 12: Settings + Account Management (account deletion, storage analytics, remote config).
-- STAGE 13 & 14: Automated end-to-end testing, bundle size optimization, release builds.
-
-### Exit Criteria
-- [x] Creation details screen displays high-res QR, styling parameters, and Cloudinary upload status.
-- [x] Signed uploads work for authorized users with live Cloudflare Worker signature.
-- [x] No Cloudinary API secret is shipped or exposed in the app.
-- [x] Upload status is visible and recoverable with user-friendly error alerts.
-- [x] Deleting a creation cleans up the Firestore record and local state.
-- [x] Typecheck (`npx tsc --noEmit`) and lint (`npm run lint`) pass with 0 errors.
-
----
-
-## STAGE 11 — AI Analysis and Smart Create
-
-### Objective
-Add optional AI features without compromising privacy or offline functionality.
-
-### AI Features
-- Explain a scanned code.
-- Summarize its destination and content type.
-- Provide risk hints.
-- Convert a natural-language request into a QR payload.
-
-### Tasks & Deliverables
-- [x] Smart AI Creator Screen: `src/app/create/smart.tsx` with natural-language prompt parsing and pre-filled QR configurations.
-- [x] AI Scan Analysis Screen: `src/app/ai/analyze.tsx` with security risk scoring (low/medium/high), phishing detection, and plain-English code explanation.
-- [x] Client AI Service: `src/services/ai/aiService.ts` (`analyzeScanWithAi` & `smartCreateWithAi`).
-- [x] Contextual Triggers: "Analyze with Gemini AI" on `scan-result/[id]` and "Smart AI Creator" banner on `(tabs)/create`.
-- Implement `analyzeScan` and `smartCreate` Cloud Functions.
-- Call Gemini only through the server.
-- Require explicit user action before sending scanned content for analysis.
-- Validate AI input and output.
-- Add authentication, App Check and server-side quotas.
-- Show progress, failure and retry states.
-- Keep ordinary scanning and QR creation fully functional without AI.
-
-### Exit Criteria
-- [x] AI screens and services render responsive, elegant UI with clear online account gating.
-- [x] AI failures do not block core offline QR features.
-- AI features work through secured server endpoints.
-- API keys remain server-side.
-- Users control when scan content is submitted.
-
----
-
-## STAGE 12 — Settings and Account Management
-
-### Objective
-Complete user preferences and account lifecycle management.
-
-### Tasks & Deliverables
-- [x] Online User Account Profile Screen: `src/app/account/profile.tsx` with cloud storage indicators, force sync trigger, UID copy, and permanent account deletion.
-- [x] Account Deletion Service: `src/services/firebase/accountService.ts` (`deleteUserAccount`).
-- [x] Enhanced Settings Screen: `src/app/(tabs)/settings.tsx` with deep-links to `/account/profile`, `/migrate`, and `/create/smart`.
-- [x] 404 Route Screen: `src/app/+not-found.tsx` for missing deep-links with return home action.
-- Implement system/light/dark theme.
-- Add haptics, sound, auto-save and auto-open preferences.
-- Persist settings locally and synchronize them when appropriate.
-- Add account deletion through a secured Cloud Function.
-- Delete associated Firestore and Cloudinary data as required.
-- Add feature flags through Remote Config.
-- Keep compiled defaults so basic functionality remains available offline.
-
-### Exit Criteria
-- [x] Preferences survive app restarts.
-- [x] Theme changes apply consistently.
-- [x] Account profile and deletion flows are accessible and confirmed.
-- Remote configuration failures do not break the app.
-
----
-
-## STAGE 13 — Testing, Security and Performance
-
-### Objective
-Verify that the complete app is stable, private and safe.
-
-### Test Areas
-- First launch and returning-user navigation.
-- Guest session restoration.
-- Offline scanning and QR creation.
-- Local history persistence.
-- Account sign-in, sign-out and password reset.
-- Guest-to-account migration and retry behavior.
-- Firestore access rules.
-- Cloudinary upload and deletion.
-- AI quotas, validation and privacy.
-- Camera and gallery permissions.
-- Light/dark mode and accessibility.
-- Android and iOS builds, where supported.
-
-### Exit Criteria
-- TypeScript checks pass.
-- No critical navigation or data-loss bugs remain.
-- Security rules are tested.
-- Offline behavior is verified on a physical device.
-- Performance and crash reporting are reviewed.
-
----
-
-## STAGE 14 — Release Preparation
-
-### Objective
-Prepare a production-ready release.
-
-### Tasks
-- Create preview and production build configurations.
-- Verify environment variables and native Firebase configuration.
-- Check release signing and app metadata.
-- Configure analytics, Crashlytics and usage alerts.
-- Configure App Check after validating legitimate traffic.
-- Review billing alerts and Cloud Functions limits.
-- Test a release build with internal testers.
-- Prepare store screenshots, description and privacy disclosures.
-- Document build, deployment and rollback procedures.
-
-### Exit Criteria
-- Release build installs and works correctly.
-- No development secrets are exposed.
-- Monitoring and billing alerts are configured.
-- Critical user flows pass final testing.
-
----
-
-## 3. Cross-Stage Rules
-
-**Code structure:** UI components should not call Firebase or external APIs directly. Services handle data and SDK operations.
-
-**State management:** Use typed Redux hooks, serializable state, normalized history where useful, and ISO date strings in Redux.
-
-**Error handling:** Use a consistent `{ code, message }` error shape.
-
-**Styling:** Use NativeWind classes and shared design tokens. Avoid scattered hard-coded colors.
-
-**Privacy:** Never include scanned or created content in analytics events.
-
-**Security:** Protect server-side operations with authentication, App Check, input validation and quotas as appropriate.
-
-**Version control:** Commit after each completed stage and use tags such as `stage-3-complete`.
-
-## 4. Immediate Next Steps
-
-The current priority is **not** Firebase, Cloudinary or AI. First establish a reliable app entry and offline guest experience.
-
-1. Audit the existing routes and authentication files.
-2. Verify onboarding and Welcome navigation.
-3. Finish the authentication screens.
-4. Install `expo-secure-store` if it is not already installed.
-5. Implement local guest-session creation and restoration.
-6. Test guest access with the internet disabled and after restarting the app.
-7. Only then proceed to the main navigation and QR features.
-
-**Development rule:** Do not start the next stage until the current stage's exit criteria pass.
+- **STAGE 14: Release Engineering & Production Deployment**
+  - EAS Build configuration for Android (`.aab`) and iOS (`.ipa`).
+  - Production Firebase App Check integration to safeguard Cloud Functions and backend resources.
+  - Final end-to-end device testing across Android and iOS release builds.
