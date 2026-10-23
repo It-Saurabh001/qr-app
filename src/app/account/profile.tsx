@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
+import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useState } from "react";
@@ -18,7 +19,10 @@ import { deleteUserAccount } from "@/services/firebase/accountService";
 import { syncGuestHistoryToCloud } from "@/services/firebase/historyService";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import { signOut } from "@/store/slices/authSlice";
-import { historySelectors } from "@/store/slices/historySlice";
+import {
+  historySelectors,
+  mergeHistoryItems,
+} from "@/store/slices/historySlice";
 import { guestSessionEnded } from "@/store/slices/localGuestSlice";
 
 export default function AccountProfileScreen() {
@@ -34,6 +38,7 @@ export default function AccountProfileScreen() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const handleCopyUid = async () => {
+    console.log('[AccountProfile] 🔘 Button "Copy UID" pressed');
     if (user?.uid) {
       await Clipboard.setStringAsync(user.uid);
       Alert.alert("Copied", "User ID copied to clipboard.");
@@ -41,23 +46,56 @@ export default function AccountProfileScreen() {
   };
 
   const handleForceSync = async () => {
-    if (!user) return;
+    console.log(`[AccountProfile] 📍 Screen: "Account & Cloud Settings"`);
+    console.log(
+      `[AccountProfile] 🔘 Button "Sync Cloud Data Now" pressed by user: ${user?.uid || "unauthenticated"}`,
+    );
+
+    if (!user) {
+      console.warn("[AccountProfile] ⚠️ Sync aborted: No authenticated user.");
+      Alert.alert(
+        "Sign In Required",
+        "Please sign in with an online account to sync data to Firestore.",
+      );
+      return;
+    }
+
     setIsSyncing(true);
+    console.log(
+      `[AccountProfile] ⏳ Starting cloud sync for ${history.length} local items...`,
+    );
+
     try {
-      await syncGuestHistoryToCloud(user.uid, history);
+      const syncedItems = await syncGuestHistoryToCloud(user.uid, history);
+      console.log(
+        `[AccountProfile] 🔄 Merging ${syncedItems.length} cloud records into Redux store...`,
+      );
+      dispatch(mergeHistoryItems(syncedItems));
+      console.log(
+        `[AccountProfile] ✅ Cloud sync completed successfully (${syncedItems.length} total cloud records).`,
+      );
+
       Alert.alert(
         "Cloud Sync Complete",
-        "Your QR codes and scan records are up-to-date in Firestore.",
+        `Your QR history (${syncedItems.length} records) is now safely synced with Firestore.`,
       );
-    } catch (err) {
-      console.error("Sync error:", err);
-      Alert.alert("Sync Failed", "Could not complete cloud synchronization.");
+    } catch (err: any) {
+      console.error(
+        "[AccountProfile] ❌ Cloud sync failed:",
+        err?.message || err,
+      );
+      Alert.alert(
+        "Sync Failed",
+        err?.message || "Could not complete cloud synchronization.",
+      );
     } finally {
       setIsSyncing(false);
+      console.log("[AccountProfile] 🏁 Sync operation finished.");
     }
   };
 
   const handleSignOut = () => {
+    console.log('[AccountProfile] 🔘 Button "Sign Out" pressed');
     Alert.alert(
       "Sign Out",
       "Do you want to retain your local data on this device after signing out?",
@@ -67,6 +105,7 @@ export default function AccountProfileScreen() {
           text: "Clear & Sign Out",
           style: "destructive",
           onPress: async () => {
+            console.log('[AccountProfile] ⏳ Signing out (clearing local data)...');
             try {
               await dispatch(signOut()).unwrap();
             } catch {
@@ -74,17 +113,20 @@ export default function AccountProfileScreen() {
             }
             await clearLocalGuestSession();
             dispatch(guestSessionEnded());
+            console.log('[AccountProfile] ✅ Sign out complete. Redirecting to Sign In.');
             router.replace("/(auth)/sign-in");
           },
         },
         {
           text: "Keep Local Data",
           onPress: async () => {
+            console.log('[AccountProfile] ⏳ Signing out (retaining local data)...');
             try {
               await dispatch(signOut()).unwrap();
             } catch {
               // ignore
             }
+            console.log('[AccountProfile] ✅ Sign out complete. Redirecting to Sign In.');
             router.replace("/(auth)/sign-in");
           },
         },
@@ -93,6 +135,7 @@ export default function AccountProfileScreen() {
   };
 
   const handleDeleteAccount = () => {
+    console.log('[AccountProfile] 🔘 Button "Delete Account Permanently" pressed');
     Alert.alert(
       "Delete Account Permanently?",
       "WARNING: This action is permanent and cannot be undone. All your Firestore records, Cloudinary assets, and Firebase account will be permanently deleted.",
@@ -103,14 +146,16 @@ export default function AccountProfileScreen() {
           style: "destructive",
           onPress: async () => {
             setIsDeleting(true);
+            console.log(`[AccountProfile] ⏳ Deleting account permanently for user: ${user?.uid}...`);
             try {
               await deleteUserAccount();
               await clearLocalGuestSession();
               dispatch(guestSessionEnded());
+              console.log('[AccountProfile] ✅ Account permanently deleted.');
               router.replace("/(auth)/sign-in");
               Alert.alert("Account Deleted", "Your account and data have been removed.");
             } catch (err) {
-              console.error("Delete account error:", err);
+              console.error("[AccountProfile] ❌ Delete account error:", err);
               Alert.alert(
                 "Error",
                 "Could not delete account. If you haven't signed in recently, please re-authenticate and try again.",
@@ -136,7 +181,10 @@ export default function AccountProfileScreen() {
           {/* Header */}
           <View className="mb-6 flex-row items-center gap-3">
             <Pressable
-              onPress={() => router.back()}
+              onPress={() => {
+                console.log('[AccountProfile] 🔘 Button "Back" pressed');
+                router.back();
+              }}
               accessibilityRole="button"
               accessibilityLabel="Go back"
               className="h-11 w-11 items-center justify-center rounded-2xl bg-slate-100 active:bg-slate-200 dark:bg-slate-900 dark:active:bg-slate-800"
@@ -156,13 +204,24 @@ export default function AccountProfileScreen() {
 
           {/* User Profile Card */}
           <View className="mb-6 items-center rounded-3xl border border-violet-100 bg-violet-50/70 p-6 dark:border-violet-900/60 dark:bg-violet-950/40">
-            <View className="mb-4 h-20 w-20 items-center justify-center rounded-3xl bg-violet-600 shadow-md shadow-violet-500/25">
-              <Text className="text-3xl font-extrabold text-white">
-                {(user?.displayName || user?.email || "U")
-                  .charAt(0)
-                  .toUpperCase()}
-              </Text>
-            </View>
+            {user?.photoURL ? (
+              <View className="mb-4 h-20 w-20 overflow-hidden rounded-3xl border-2 border-violet-300 shadow-md shadow-violet-500/25 dark:border-violet-700">
+                <Image
+                  source={{ uri: user.photoURL }}
+                  style={{ width: "100%", height: "100%" }}
+                  contentFit="cover"
+                  transition={200}
+                />
+              </View>
+            ) : (
+              <View className="mb-4 h-20 w-20 items-center justify-center rounded-3xl bg-violet-600 shadow-md shadow-violet-500/25">
+                <Text className="text-3xl font-extrabold text-white">
+                  {(user?.displayName || user?.email || "U")
+                    .charAt(0)
+                    .toUpperCase()}
+                </Text>
+              </View>
+            )}
 
             <Text className="text-xl font-bold text-slate-900 dark:text-white">
               {user?.displayName || "Signed In User"}
@@ -261,8 +320,15 @@ export default function AccountProfileScreen() {
             </View>
           </View>
 
-          {/* Cloud Operations */}
-          <View className="mb-6 gap-3">
+          {/* Cloud Operations: Unified Single-Place Sync */}
+          <View className="mb-6 rounded-3xl border border-slate-100 bg-white p-5 shadow-sm shadow-slate-100 dark:border-slate-800 dark:bg-slate-900 dark:shadow-none">
+            <Text className="mb-1 text-xs font-bold uppercase tracking-wider text-slate-400">
+              Cloud Data Synchronization
+            </Text>
+            <Text className="mb-4 text-xs text-slate-500 dark:text-slate-400">
+              Upload all local scans & creations to Firestore and fetch latest cloud records across your devices.
+            </Text>
+
             <Pressable
               onPress={handleForceSync}
               disabled={isSyncing}
@@ -279,17 +345,6 @@ export default function AccountProfileScreen() {
                   </Text>
                 </>
               )}
-            </Pressable>
-
-            <Pressable
-              onPress={() => router.push("/migrate")}
-              accessibilityRole="button"
-              className="flex-row items-center justify-center rounded-2xl border border-slate-200 bg-white py-3.5 active:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:active:bg-slate-800"
-            >
-              <Ionicons name="cloud-upload-outline" size={18} color="#7C3AED" />
-              <Text className="ml-2 font-bold text-slate-900 dark:text-white">
-                Migrate Local Guest Records
-              </Text>
             </Pressable>
           </View>
 

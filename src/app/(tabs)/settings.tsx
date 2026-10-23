@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useState } from "react";
@@ -167,13 +168,24 @@ export default function SettingsScreen() {
           {/* Account Card */}
           <View className="mb-6 rounded-3xl bg-violet-50/70 p-5 dark:bg-violet-950/50">
             <View className="flex-row items-center">
-              <View className="mr-3.5 h-12 w-12 items-center justify-center rounded-2xl bg-violet-200 dark:bg-violet-900">
-                <Ionicons
-                  name={isAuthenticated ? "person" : "phone-portrait-outline"}
-                  size={24}
-                  color="#7C3AED"
-                />
-              </View>
+              {isAuthenticated && user?.photoURL ? (
+                <View className="mr-3.5 h-12 w-12 overflow-hidden rounded-2xl border border-violet-200 dark:border-violet-800">
+                  <Image
+                    source={{ uri: user.photoURL }}
+                    style={{ width: "100%", height: "100%" }}
+                    contentFit="cover"
+                    transition={200}
+                  />
+                </View>
+              ) : (
+                <View className="mr-3.5 h-12 w-12 items-center justify-center rounded-2xl bg-violet-200 dark:bg-violet-900">
+                  <Ionicons
+                    name={isAuthenticated ? "person" : "phone-portrait-outline"}
+                    size={24}
+                    color="#7C3AED"
+                  />
+                </View>
+              )}
 
               <View className="flex-1">
                 <View className="flex-row items-center gap-2">
@@ -210,7 +222,10 @@ export default function SettingsScreen() {
             {isAuthenticated ? (
               <View className="mt-4 gap-2">
                 <Pressable
-                  onPress={() => router.push("/account/profile")}
+                  onPress={() => {
+                    console.log('[Preferences] 🔘 Button "Manage Cloud & Account Settings" pressed');
+                    router.push("/account/profile");
+                  }}
                   accessibilityRole="button"
                   className="min-h-11 flex-row items-center justify-between rounded-2xl bg-white px-4 py-2.5 active:bg-violet-100 dark:bg-slate-900 dark:active:bg-slate-800"
                 >
@@ -224,7 +239,10 @@ export default function SettingsScreen() {
                 </Pressable>
 
                 <Pressable
-                  onPress={handleSignOut}
+                  onPress={() => {
+                    console.log('[Preferences] 🔘 Button "Sign Out" pressed');
+                    handleSignOut();
+                  }}
                   accessibilityRole="button"
                   className="min-h-11 flex-row items-center justify-center rounded-2xl bg-white px-4 py-2.5 active:bg-violet-100 dark:bg-slate-900 dark:active:bg-slate-800"
                 >
@@ -237,7 +255,10 @@ export default function SettingsScreen() {
             ) : (
               <View className="mt-4 flex-row gap-2">
                 <Pressable
-                  onPress={() => router.push("/(auth)/sign-in")}
+                  onPress={() => {
+                    console.log('[Preferences] 🔘 Button "Sign In / Register" pressed');
+                    router.push("/(auth)/sign-in");
+                  }}
                   accessibilityRole="button"
                   className="min-h-11 flex-1 items-center justify-center rounded-2xl bg-violet-600 px-4 py-2.5 active:bg-violet-700"
                 >
@@ -248,7 +269,10 @@ export default function SettingsScreen() {
 
                 {guestActive ? (
                   <Pressable
-                    onPress={handleExitGuest}
+                    onPress={() => {
+                      console.log('[Preferences] 🔘 Button "Exit Guest" pressed');
+                      handleExitGuest();
+                    }}
                     accessibilityRole="button"
                     className="min-h-11 items-center justify-center rounded-2xl bg-white px-4 py-2.5 active:bg-slate-100 dark:bg-slate-900 dark:active:bg-slate-800"
                   >
@@ -271,7 +295,10 @@ export default function SettingsScreen() {
             </Text>
 
             <Pressable
-              onPress={() => router.push("/create/smart")}
+              onPress={() => {
+                console.log('[Preferences] 🔘 Button "Smart AI Creator" pressed');
+                router.push("/create/smart");
+              }}
               accessibilityRole="button"
               className="flex-row items-center justify-between py-3 border-b border-slate-100 dark:border-slate-800"
             >
@@ -292,20 +319,27 @@ export default function SettingsScreen() {
             </Pressable>
 
             <Pressable
-              onPress={() => router.push("/migrate")}
+              onPress={() => {
+                console.log('[Preferences] 🔘 Button "Cloud Account & Storage" pressed');
+                if (isAuthenticated) {
+                  router.push("/account/profile");
+                } else {
+                  router.push("/(auth)/sign-in");
+                }
+              }}
               accessibilityRole="button"
               className="flex-row items-center justify-between py-3"
             >
               <View className="flex-row items-center gap-3">
                 <View className="h-9 w-9 items-center justify-center rounded-xl bg-blue-100 dark:bg-blue-950">
-                  <Ionicons name="cloud-upload-outline" size={18} color="#2563EB" />
+                  <Ionicons name="cloud-done-outline" size={18} color="#2563EB" />
                 </View>
                 <View>
                   <Text className="text-sm font-bold text-slate-900 dark:text-white">
-                    Cloud Data Migration
+                    Cloud Storage & Sync
                   </Text>
                   <Text className="text-xs text-slate-400">
-                    Sync local scans & creations to Firestore
+                    Manage Firestore database & cloud sync
                   </Text>
                 </View>
               </View>
@@ -329,7 +363,10 @@ export default function SettingsScreen() {
                 return (
                   <Pressable
                     key={option.value}
-                    onPress={() => dispatch(setTheme(option.value))}
+                    onPress={() => {
+                      console.log(`[Preferences] 🔘 Theme switched to: "${option.value}"`);
+                      dispatch(setTheme(option.value));
+                    }}
                     accessibilityRole="button"
                     accessibilityState={{ selected }}
                     className={`min-h-10 flex-1 flex-row items-center justify-center rounded-xl py-2 ${selected ? "bg-violet-600" : "bg-transparent"
@@ -368,7 +405,10 @@ export default function SettingsScreen() {
               title="Auto-save scans"
               description="Automatically save scanned codes to local history."
               value={autoSaveScans}
-              onToggle={() => dispatch(setAutoSaveScans(!autoSaveScans))}
+              onToggle={() => {
+                console.log(`[Preferences] 🔘 Toggle "Auto-save scans" changed to: ${!autoSaveScans}`);
+                dispatch(setAutoSaveScans(!autoSaveScans));
+              }}
             />
 
             <View className="h-px bg-slate-100 dark:bg-slate-800" />
@@ -378,7 +418,10 @@ export default function SettingsScreen() {
               title="Vibrate on scan"
               description="Haptic vibration when a barcode or QR is recognized."
               value={vibrateOnScan}
-              onToggle={() => dispatch(setVibrateOnScan(!vibrateOnScan))}
+              onToggle={() => {
+                console.log(`[Preferences] 🔘 Toggle "Vibrate on scan" changed to: ${!vibrateOnScan}`);
+                dispatch(setVibrateOnScan(!vibrateOnScan));
+              }}
             />
 
             <View className="h-px bg-slate-100 dark:bg-slate-800" />
@@ -388,7 +431,10 @@ export default function SettingsScreen() {
               title="Sound on scan"
               description="Play sound notification upon code detection."
               value={soundOnScan}
-              onToggle={() => dispatch(setSoundOnScan(!soundOnScan))}
+              onToggle={() => {
+                console.log(`[Preferences] 🔘 Toggle "Sound on scan" changed to: ${!soundOnScan}`);
+                dispatch(setSoundOnScan(!soundOnScan));
+              }}
             />
 
             <View className="h-px bg-slate-100 dark:bg-slate-800" />
@@ -398,7 +444,10 @@ export default function SettingsScreen() {
               title="Auto-open links"
               description="Prompt before opening external web URLs."
               value={autoOpenLinks}
-              onToggle={() => setAutoOpenLinks((value) => !value)}
+              onToggle={() => {
+                console.log(`[Preferences] 🔘 Toggle "Auto-open links" changed to: ${!autoOpenLinks}`);
+                setAutoOpenLinks((value) => !value);
+              }}
             />
           </View>
 

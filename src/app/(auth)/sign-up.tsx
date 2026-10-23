@@ -12,17 +12,14 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import { clearAuthError, signUp } from "@/store/slices/authSlice";
-import { historySelectors } from "@/store/slices/historySlice";
 
 export default function SignUpScreen() {
   const router = useRouter();
   const dispatch = useAppDispatch();
 
-  const history = useAppSelector((state) =>
-    historySelectors.selectAll(state.history),
-  );
   const { opStatus, error } = useAppSelector((state) => state.auth);
   const isLoading = opStatus === "loading";
 
@@ -72,14 +69,15 @@ export default function SignUpScreen() {
         }),
       ).unwrap();
 
-      if (history.length > 0) {
-        router.replace("/migrate");
-      } else {
-        router.replace("/(tabs)");
-      }
+      handleAuthSuccess();
     } catch {
       // Redux stores the friendly Firebase error message.
     }
+  };
+
+  const handleAuthSuccess = () => {
+    console.log('[Auth] ✅ Sign-up successful, navigating to Home tabs.');
+    router.replace("/(tabs)");
   };
 
   const clearMessages = () => {
@@ -267,6 +265,23 @@ export default function SignUpScreen() {
                   {isLoading ? "Creating Account..." : "Create Account"}
                 </Text>
               </Pressable>
+
+              {/* Divider */}
+              <View className="my-3 flex-row items-center">
+                <View className="h-px flex-1 bg-slate-200 dark:bg-slate-800" />
+                <Text className="mx-4 text-xs font-medium text-slate-400">
+                  OR
+                </Text>
+                <View className="h-px flex-1 bg-slate-200 dark:bg-slate-800" />
+              </View>
+
+              {/* Google Sign In */}
+              <GoogleSignInButton
+                title="Sign up with Google"
+                disabled={isLoading}
+                onSuccess={handleAuthSuccess}
+                onError={setValidationError}
+              />
             </View>
 
             <View className="mt-7 flex-row justify-center">

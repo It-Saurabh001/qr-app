@@ -13,11 +13,15 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { syncGuestHistoryToCloud } from "@/services/firebase/historyService";
-import { useAppSelector } from "@/store/hooks";
-import { historySelectors } from "@/store/slices/historySlice";
+import { useAppDispatch, useAppSelector } from "@/store/hooks";
+import {
+  historySelectors,
+  mergeHistoryItems,
+} from "@/store/slices/historySlice";
 
 export default function MigrateScreen() {
   const router = useRouter();
+  const dispatch = useAppDispatch();
   const user = useAppSelector((state) => state.auth.user);
   const history = useAppSelector((state) =>
     historySelectors.selectAll(state.history),
@@ -39,26 +43,39 @@ export default function MigrateScreen() {
   const [migratedCount, setMigratedCount] = useState(0);
 
   const handleStartMigration = async () => {
+    console.log(`[Migration] 📍 Screen: "Migrate Guest History"`);
+    console.log(
+      `[Migration] 🔘 Button "Migrate All to Cloud" pressed by user: ${user?.uid || "unauthenticated"}`,
+    );
+
     if (!user) {
+      console.warn("[Migration] ⚠️ Migration aborted: User not signed in.");
       Alert.alert("Account required", "Please sign in before migrating data.");
       router.replace("/(auth)/sign-in");
       return;
     }
 
     if (history.length === 0) {
+      console.log("[Migration] ℹ️ No local records found to migrate. Routing to Home.");
       router.replace("/(tabs)");
       return;
     }
 
     setStatus("migrating");
     setErrorMessage("");
+    console.log(`[Migration] ⏳ Migrating ${history.length} items to cloud...`);
 
     try {
       const syncedDocs = await syncGuestHistoryToCloud(user.uid, history);
+      dispatch(mergeHistoryItems(syncedDocs));
       setMigratedCount(syncedDocs.length || history.length);
       setStatus("success");
+      console.log(`[Migration] ✅ Migration successful (${syncedDocs.length} cloud records synced).`);
     } catch (err: unknown) {
-      console.error("Migration error:", err);
+      console.error(
+        "[Migration] ❌ Migration failed:",
+        err instanceof Error ? err.message : err,
+      );
       const msg =
         err instanceof Error
           ? err.message
@@ -69,6 +86,7 @@ export default function MigrateScreen() {
   };
 
   const handleFinish = () => {
+    console.log('[Migration] 🔘 Button "Finish / Continue" pressed');
     router.replace("/(tabs)");
   };
 

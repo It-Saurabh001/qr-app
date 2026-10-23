@@ -15,6 +15,10 @@ export type QRHistoryItem = {
   foregroundColor?: string;
   backgroundColor?: string;
   ecl?: "L" | "M" | "Q" | "H";
+  cloudUrl?: string;
+  publicId?: string;
+  cloudAssetId?: string;
+  cloudUploadedAt?: string;
 };
 
 const historyAdapter = createEntityAdapter<QRHistoryItem>({
@@ -32,6 +36,12 @@ const historySlice = createSlice({
   reducers: {
     addHistoryItem(state, action: PayloadAction<QRHistoryItem>) {
       historyAdapter.upsertOne(state, action.payload);
+    },
+    updateHistoryItem(
+      state,
+      action: PayloadAction<{ id: string; changes: Partial<QRHistoryItem> }>,
+    ) {
+      historyAdapter.updateOne(state, action.payload);
     },
     removeHistoryItem(state, action: PayloadAction<string>) {
       historyAdapter.removeOne(state, action.payload);
@@ -65,6 +75,7 @@ const historySlice = createSlice({
 
 export const {
   addHistoryItem,
+  updateHistoryItem,
   removeHistoryItem,
   toggleFavorite,
   clearHistory,

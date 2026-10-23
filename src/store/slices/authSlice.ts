@@ -7,7 +7,7 @@ import {
 import {
   sendReset,
   signInEmail,
-  signInGuest,
+  signInGoogle,
   signOutUser,
   signUpEmail,
 } from "@/services/firebase/authService";
@@ -17,7 +17,7 @@ export type AuthUser = {
   uid: string;
   email: string | null;
   displayName: string | null;
-  isAnonymous: boolean;
+  photoURL: string | null;
 };
 
 export type AuthStatus = "initializing" | "authenticated" | "unauthenticated";
@@ -70,17 +70,6 @@ export const signOut = createAsyncThunk<void, void, { rejectValue: AppError }>(
     }
   },
 );
-export const continueAsGuest = createAsyncThunk<
-  void,
-  void,
-  { rejectValue: AppError }
->("auth/continueAsGuest", async (_, { rejectWithValue }) => {
-  try {
-    await signInGuest();
-  } catch (error) {
-    return rejectWithValue(getAppError(error));
-  }
-});
 
 export const resetPassword = createAsyncThunk<
   void,
@@ -90,6 +79,21 @@ export const resetPassword = createAsyncThunk<
   try {
     await sendReset(email);
   } catch (error) {
+    return rejectWithValue(getAppError(error));
+  }
+});
+
+export const signInWithGoogle = createAsyncThunk<
+  void,
+  void,
+  { rejectValue: AppError }
+>("auth/signInWithGoogle", async (_, { rejectWithValue }) => {
+  try {
+    console.log("[Redux Auth] Dispatching signInWithGoogle thunk...");
+    await signInGoogle();
+    console.log("[Redux Auth] signInWithGoogle fulfilled.");
+  } catch (error) {
+    console.error("[Redux Auth] signInWithGoogle rejected with:", error);
     return rejectWithValue(getAppError(error));
   }
 });
@@ -110,7 +114,13 @@ const authSlice = createSlice({
     },
   },
   extraReducers: (builder) => {
-    const requests = [signIn, signUp, signOut, resetPassword, continueAsGuest];
+    const requests = [
+      signIn,
+      signUp,
+      signOut,
+      resetPassword,
+      signInWithGoogle,
+    ];
 
     for (const request of requests) {
       builder

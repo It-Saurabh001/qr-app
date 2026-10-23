@@ -16,6 +16,14 @@ const authMessages: Record<string, string> = {
     "Network error. Check your internet connection.",
   "auth/requires-recent-login": "Please sign in again to continue.",
   "auth/operation-not-allowed": "This sign-in method is not enabled.",
+  "auth/user-cancelled": "Google Sign-In was cancelled.",
+  "auth/google-sign-in-failed": "Google Sign-In failed. Please try again.",
+  "auth/native-module-missing":
+    "Google Sign-In requires a native development build. Rebuild your app using 'npx expo run:android' or 'npx expo run:ios'.",
+  "auth/developer-error":
+    "Google Sign-In configuration error (DEVELOPER_ERROR 10). Missing Web Client ID in .env or SHA-1 fingerprint in Firebase Console.",
+  "10":
+    "Google Sign-In configuration error (DEVELOPER_ERROR 10). Missing Web Client ID in .env or SHA-1 fingerprint in Firebase Console.",
 };
 
 export function getAppError(error: unknown): AppError {
@@ -28,6 +36,9 @@ export function getAppError(error: unknown): AppError {
 
   return {
     code,
-    message: authMessages[code] ?? "Something went wrong. Please try again.",
+    message:
+      authMessages[code] ??
+      candidate?.message ??
+      "Something went wrong. Please try again.",
   };
 }

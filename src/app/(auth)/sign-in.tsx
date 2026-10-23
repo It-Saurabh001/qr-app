@@ -14,22 +14,19 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
 import { saveLocalGuestSession } from "@/services/auth/localGuestSession";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import {
   clearAuthError,
   signIn,
 } from "@/store/slices/authSlice";
-import { historySelectors } from "@/store/slices/historySlice";
 import { guestSessionStarted } from "@/store/slices/localGuestSlice";
 
 export default function SignInScreen() {
   const router = useRouter();
   const dispatch = useAppDispatch();
 
-  const history = useAppSelector((state) =>
-    historySelectors.selectAll(state.history),
-  );
   const { opStatus, error } = useAppSelector((state) => state.auth);
   const isLoading = opStatus === "loading";
 
@@ -68,16 +65,17 @@ export default function SignInScreen() {
           password,
         }),
       ).unwrap();
- 
-      if (history.length > 0) {
-        router.replace("/migrate");
-      } else {
-        router.replace("/(tabs)");
-      }
+
+      handleAuthSuccess();
     } catch {
       // The Redux auth slice stores the sign-in error.
       // Keep this catch to prevent an unhandled rejection.
     }
+  };
+
+  const handleAuthSuccess = () => {
+    console.log('[Auth] ✅ Sign-in successful, navigating to Home tabs.');
+    router.replace("/(tabs)");
   };
 
   const handleContinueAsGuest = async () => {
@@ -275,11 +273,30 @@ export default function SignInScreen() {
             </View>
 
             {/* Divider */}
-            <View className="my-7 flex-row items-center">
+            <View className="my-6 flex-row items-center">
               <View className="h-px flex-1 bg-slate-200 dark:bg-slate-800" />
 
               <Text className="mx-4 text-xs font-medium text-slate-400">
                 OR
+              </Text>
+
+              <View className="h-px flex-1 bg-slate-200 dark:bg-slate-800" />
+            </View>
+
+            {/* Google Sign In for online users */}
+            <GoogleSignInButton
+              title="Continue with Google"
+              disabled={isBusy}
+              onSuccess={handleAuthSuccess}
+              onError={setValidationError}
+            />
+
+            {/* Offline Guest Divider */}
+            <View className="my-6 flex-row items-center">
+              <View className="h-px flex-1 bg-slate-200 dark:bg-slate-800" />
+
+              <Text className="mx-4 text-xs font-medium text-slate-400">
+                OR CONTINUE OFFLINE
               </Text>
 
               <View className="h-px flex-1 bg-slate-200 dark:bg-slate-800" />

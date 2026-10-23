@@ -2,8 +2,13 @@ export type FirebaseUserLike = {
   uid: string;
   email: string | null;
   displayName: string | null;
-  isAnonymous: boolean;
+  photoURL?: string | null;
+  getIdToken?: (forceRefresh?: boolean) => Promise<string>;
 } | null;
+
+export function getIdToken(_forceRefresh = false): Promise<string | null> {
+  return Promise.resolve(null);
+}
 
 export function observeAuth(
   _callback: (user: FirebaseUserLike) => void,
@@ -32,14 +37,14 @@ export function signInEmail(
   return unsupported();
 }
 
+export function signInGoogle() {
+  return unsupported();
+}
+
 export function signOutUser() {
   return unsupported();
 }
 
 export function sendReset(_email: string) {
-  return unsupported();
-}
-
-export function signInGuest() {
   return unsupported();
 }

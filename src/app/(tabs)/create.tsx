@@ -5,8 +5,9 @@ import { useRef, useState } from "react";
 import { Alert, Pressable, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { useAppDispatch } from "@/store/hooks";
-import { addHistoryItem } from "@/store/slices/historySlice";
+import { useAppDispatch, useAppSelector } from "@/store/hooks";
+import { addHistoryItem, type QRHistoryItem } from "@/store/slices/historySlice";
+import { saveQrToCloudFirestore } from "@/services/firebase/historyService";
 
 import {
   buildContact,
@@ -51,6 +52,7 @@ export default function CreateScreen() {
   const router = useRouter();
   const qrRef = useRef<View>(null);
   const dispatch = useAppDispatch();
+  const user = useAppSelector((state) => state.auth.user);
   const { saveQr, shareQr } = useQrExport(qrRef);
 
   const [selectedType, setSelectedType] = useState<CreatorType>("url");
@@ -116,22 +118,35 @@ export default function CreateScreen() {
     }
 
     const now = new Date();
+    const newItem: QRHistoryItem = {
+      id: `create-${now.getTime()}-${Math.random().toString(36).slice(2, 8)}`,
+      content,
+      format: selectedType.toUpperCase(),
+      type: "create",
+      title: `${selectedType.toUpperCase()} QR`,
+      isFavorite: false,
+      createdAt: now.toISOString(),
+      foregroundColor,
+      backgroundColor,
+      ecl,
+    };
 
-    dispatch(
-      addHistoryItem({
-        id: `create-${now.getTime()}-${Math.random().toString(36).slice(2, 8)}`,
-        content,
-        format: selectedType.toUpperCase(),
-        type: "create",
-        title: `${selectedType.toUpperCase()} QR`,
-        isFavorite: false,
-        createdAt: now.toISOString(),
-        foregroundColor,
-        backgroundColor,
-        ecl,
-      }),
-    );
+    console.log(`[CreateScreen] 🔘 Button "Save to History" pressed (Type: ${selectedType}, Content: "${content.slice(0, 30)}...")`);
+    dispatch(addHistoryItem(newItem));
+    console.log(`[CreateScreen] 💾 Saved QR item "${newItem.id}" to local Redux store.`);
 
+    if (user?.uid) {
+      console.log(`[CreateScreen] ⏳ Syncing creation "${newItem.id}" to Firestore (users/${user.uid}/history)...`);
+      saveQrToCloudFirestore(user.uid, newItem)
+        .then(() => {
+          console.log(`[CreateScreen] ✅ Creation "${newItem.id}" synced to Firestore.`);
+        })
+        .catch((err) => {
+          console.warn("[CreateScreen] ⚠️ Failed to auto-sync to Firestore:", err?.message || err);
+        });
+    }
+
+    console.log(`[CreateScreen] ℹ️ Cloudinary asset: Image is not auto-uploaded on creation. Open this item from History tab to upload its PNG to Cloudinary CDN.`);
     Alert.alert("Saved", "Your QR code has been added to history.");
   }
 

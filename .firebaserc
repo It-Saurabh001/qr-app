@@ -1,5 +1,7 @@
 {
   "projects": {
     "default": "qr-app-664cc"
-  }
+  },
+  "targets": {},
+  "etags": {}
 }

@@ -2,10 +2,11 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Linking,
   Pressable,
   ScrollView,
   Share,
@@ -17,11 +18,16 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useQrExport } from "@/features/creator/useQrExport";
 import { uploadQrToCloudinary } from "@/services/cloudinary/uploadService";
+import {
+  deleteQrFromCloudFirestore,
+  updateQrCloudinaryMetadata,
+} from "@/services/firebase/historyService";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import {
   historySelectors,
   removeHistoryItem,
   toggleFavorite,
+  updateHistoryItem,
 } from "@/store/slices/historySlice";
 
 export default function CreationDetailScreen() {
@@ -35,11 +41,18 @@ export default function CreationDetailScreen() {
   const user = useAppSelector((state) => state.auth.user);
   const isAuthenticated = Boolean(user);
 
+  useEffect(() => {
+    console.log(
+      `[CreationStudio] 📍 Screen: "Creation Studio" | Item: "${id}" | Cloudinary URL: ${creationItem?.cloudUrl ? `"${creationItem.cloudUrl}"` : "None (Not uploaded yet)"}`,
+    );
+  }, [id, creationItem?.cloudUrl]);
+
   const qrRef = useRef<View>(null);
-  const { saveQr, shareQr } = useQrExport(qrRef);
+  const { captureQr, saveQr, shareQr } = useQrExport(qrRef);
 
   const [isUploading, setIsUploading] = useState(false);
-  const [cloudUrl, setCloudUrl] = useState<string | null>(null);
+  const [uploadedCloudUrl, setUploadedCloudUrl] = useState<string | null>(null);
+  const cloudUrl = uploadedCloudUrl ?? creationItem?.cloudUrl ?? null;
 
   const payload = creationItem?.content ?? "https://example.com";
   const format = creationItem?.format ?? "QR";
@@ -53,6 +66,21 @@ export default function CreationDetailScreen() {
     Alert.alert("Copied", "Content copied to clipboard.");
   };
 
+  const handleCopyCloudUrl = async () => {
+    if (!cloudUrl) return;
+    await Clipboard.setStringAsync(cloudUrl);
+    Alert.alert("Copied", "Cloudinary CDN link copied to clipboard.");
+  };
+
+  const handleOpenCloudUrl = async () => {
+    if (!cloudUrl) return;
+    try {
+      await Linking.openURL(cloudUrl);
+    } catch {
+      Alert.alert("Error", "Could not open link in browser.");
+    }
+  };
+
   const handleShareText = async () => {
     try {
       await Share.share({ message: payload });
@@ -62,7 +90,9 @@ export default function CreationDetailScreen() {
   };
 
   const handleUploadToCloud = async () => {
-    if (!isAuthenticated) {
+    console.log(`[CreationStudio] 🚀 [1/5] Initiating cloud backup for "${title}" (ID: ${id})...`);
+    if (!isAuthenticated || !user?.uid) {
+      console.warn("[CreationStudio] ⚠️ Upload aborted: User not signed in.");
       Alert.alert(
         "Sign In Required",
         "Sign in to your account to upload and back up QR images to Cloudinary.",
@@ -76,18 +106,58 @@ export default function CreationDetailScreen() {
 
     setIsUploading(true);
     try {
-      // Trigger cloud upload using Cloudinary service
-      const result = await uploadQrToCloudinary("local-qr-image", title);
-      setCloudUrl(result.secureUrl);
+      // Step 1: Capture live QR view into high-resolution PNG data URI
+      console.log("[CreationStudio] ⏳ [2/5] Capturing high-resolution QR snapshot...");
+      const imageUri = await captureQr("data-uri");
+      console.log("[CreationStudio] ✅ [2/5] Snapshot captured.");
+
+      // Step 2: Trigger signed Cloudinary upload using Cloudflare Worker signature
+      console.log("[CreationStudio] ⏳ [3/5] Starting signed Cloudinary upload...");
+      const result = await uploadQrToCloudinary(imageUri, title);
+      console.log(`[CreationStudio] ✅ [3/5] Cloudinary upload successful (CDN: ${result.secureUrl}).`);
+      setUploadedCloudUrl(result.secureUrl);
+
+      // Step 3: Update local Redux store with Cloudinary metadata
+      if (id) {
+        console.log("[CreationStudio] ⏳ [4/5] Updating local Redux history store...");
+        dispatch(
+          updateHistoryItem({
+            id,
+            changes: {
+              cloudUrl: result.secureUrl,
+              publicId: result.publicId,
+              cloudAssetId: result.assetId,
+              cloudUploadedAt: result.createdAt,
+            },
+          }),
+        );
+        console.log("[CreationStudio] ✅ [4/5] Local history updated.");
+
+        // Step 4: Persist Cloudinary URL and publicId into user's Firestore history
+        console.log(`[CreationStudio] ⏳ [5/5] Persisting Cloudinary metadata to Firestore for user ${user.uid}...`);
+        await updateQrCloudinaryMetadata(user.uid, id, {
+          cloudUrl: result.secureUrl,
+          publicId: result.publicId,
+          cloudAssetId: result.assetId,
+          cloudUploadedAt: result.createdAt,
+        });
+        console.log("[CreationStudio] ✅ [5/5] Cloud Firestore sync complete!");
+      }
+
+      console.log("[CreationStudio] 🎉 Cloud backup flow completed successfully.");
       Alert.alert(
         "Upload Successful",
-        "Your QR creation is now safely backed up to Cloudinary and synced with Firestore.",
+        "Your high-resolution QR is now safely hosted on Cloudinary CDN and synced with Firestore.",
       );
-    } catch (err) {
-      console.error("Upload error:", err);
-      Alert.alert("Upload Failed", "Could not upload QR code to the cloud.");
+    } catch (err: any) {
+      console.error("[CreationStudio] ❌ Cloud backup flow failed:", err?.message || err);
+      Alert.alert(
+        "Upload Failed",
+        err?.message || "Could not upload QR code to Cloudinary.",
+      );
     } finally {
       setIsUploading(false);
+      console.log("[CreationStudio] 🏁 Cloud upload process ended.");
     }
   };
 
@@ -104,9 +174,20 @@ export default function CreationDetailScreen() {
         {
           text: "Delete",
           style: "destructive",
-          onPress: () => {
+          onPress: async () => {
+            console.log(`[CreationStudio] 🗑️ Deleting creation "${title}" (ID: ${id})...`);
             if (id) {
               dispatch(removeHistoryItem(id));
+              console.log("[CreationStudio] ✅ Removed item from local Redux state.");
+              if (isAuthenticated && user?.uid) {
+                try {
+                  console.log(`[CreationStudio] ⏳ Deleting Firestore document for item ${id}...`);
+                  await deleteQrFromCloudFirestore(user.uid, id);
+                  console.log("[CreationStudio] ✅ Firestore cloud document deleted.");
+                } catch (delErr) {
+                  console.warn("[CreationStudio] ⚠️ Failed to delete from Firestore:", delErr);
+                }
+              }
             }
             router.back();
           },
@@ -276,6 +357,56 @@ export default function CreationDetailScreen() {
                   ? "Upload this high-res QR code to your Cloudinary storage for cross-device access and CDN delivery."
                   : "Sign in with an online account to host your creations on Cloudinary with fast global CDN delivery."}
             </Text>
+
+            {cloudUrl && (
+              <View className="mt-3 rounded-2xl border border-violet-200/80 bg-white/80 p-3.5 dark:border-violet-900/60 dark:bg-slate-900/80">
+                <View className="flex-row items-center justify-between">
+                  <Text className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    Cloudinary CDN URL
+                  </Text>
+                  {creationItem?.publicId && (
+                    <Text
+                      numberOfLines={1}
+                      className="max-w-[160px] text-[10px] font-medium text-slate-500 dark:text-slate-400"
+                    >
+                      {creationItem.publicId}
+                    </Text>
+                  )}
+                </View>
+
+                <Text
+                  numberOfLines={1}
+                  selectable
+                  className="mt-1 text-xs font-mono text-violet-700 dark:text-violet-300"
+                >
+                  {cloudUrl}
+                </Text>
+
+                <View className="mt-2.5 flex-row gap-2">
+                  <Pressable
+                    onPress={handleCopyCloudUrl}
+                    accessibilityRole="button"
+                    className="flex-1 flex-row items-center justify-center rounded-xl bg-violet-100 py-2 active:bg-violet-200 dark:bg-violet-900/40 dark:active:bg-violet-900/60"
+                  >
+                    <Ionicons name="copy-outline" size={13} color="#7C3AED" />
+                    <Text className="ml-1 text-xs font-bold text-violet-700 dark:text-violet-300">
+                      Copy CDN Link
+                    </Text>
+                  </Pressable>
+
+                  <Pressable
+                    onPress={handleOpenCloudUrl}
+                    accessibilityRole="button"
+                    className="flex-1 flex-row items-center justify-center rounded-xl bg-slate-100 py-2 active:bg-slate-200 dark:bg-slate-800 dark:active:bg-slate-700"
+                  >
+                    <Ionicons name="open-outline" size={13} color="#64748B" />
+                    <Text className="ml-1 text-xs font-bold text-slate-700 dark:text-slate-300">
+                      Open Link
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+            )}
 
             {isAuthenticated ? (
               <Pressable

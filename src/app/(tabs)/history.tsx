@@ -18,6 +18,7 @@ import QRCode from "react-native-qrcode-svg";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useQrExport } from "@/features/creator/useQrExport";
+import { deleteQrFromCloudFirestore } from "@/services/firebase/historyService";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import {
   clearHistory,
@@ -55,6 +56,7 @@ function formatDate(value: string) {
 export default function HistoryScreen() {
   const router = useRouter();
   const dispatch = useAppDispatch();
+  const user = useAppSelector((state) => state.auth.user);
   const history = useAppSelector((state) =>
     historySelectors.selectAll(state.history),
   );
@@ -110,7 +112,16 @@ export default function HistoryScreen() {
       {
         text: "Delete",
         style: "destructive",
-        onPress: () => dispatch(removeHistoryItem(id)),
+        onPress: async () => {
+          dispatch(removeHistoryItem(id));
+          if (user?.uid) {
+            try {
+              await deleteQrFromCloudFirestore(user.uid, id);
+            } catch (err) {
+              console.warn("Failed to delete item from cloud Firestore:", err);
+            }
+          }
+        },
       },
     ]);
   }
@@ -126,7 +137,17 @@ export default function HistoryScreen() {
         {
           text: "Clear all",
           style: "destructive",
-          onPress: () => dispatch(clearHistory()),
+          onPress: async () => {
+            const itemIds = history.map((item) => item.id);
+            dispatch(clearHistory());
+            if (user?.uid) {
+              await Promise.all(
+                itemIds.map((itemId) =>
+                  deleteQrFromCloudFirestore(user.uid, itemId).catch(() => {}),
+                ),
+              );
+            }
+          },
         },
       ],
     );
@@ -313,6 +334,14 @@ export default function HistoryScreen() {
                             <Text className="shrink-0 text-[10px] text-slate-400">
                               • {isScan ? "Scanned" : "Created"}
                             </Text>
+                            {item.cloudUrl && (
+                              <View className="flex-row items-center gap-1 rounded bg-violet-100 px-1.5 py-0.5 dark:bg-violet-950">
+                                <Ionicons name="cloud-done" size={9} color="#7C3AED" />
+                                <Text className="text-[9px] font-bold text-violet-700 dark:text-violet-300">
+                                  Cloud
+                                </Text>
+                              </View>
+                            )}
                           </View>
 
                           <View className="shrink-0 flex-row items-center gap-1 rounded-full bg-violet-50 px-2.5 py-0.5 dark:bg-violet-950/60">
@@ -499,6 +528,15 @@ export default function HistoryScreen() {
                         {selectedItem.format}
                       </Text>
                     </View>
+
+                    {selectedItem.cloudUrl && (
+                      <View className="flex-row items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 dark:bg-emerald-950">
+                        <Ionicons name="cloud-done" size={10} color="#059669" />
+                        <Text className="text-[10px] font-bold text-emerald-700 dark:text-emerald-300">
+                          Cloud
+                        </Text>
+                      </View>
+                    )}
                   </View>
 
                   <Pressable
@@ -614,11 +652,13 @@ export default function HistoryScreen() {
                     const item = selectedItem;
                     setSelectedItem(null);
                     if (item.type === "create") {
+                      console.log(`[History] 🔘 Opening Creation Studio for created item: "${item.id}" (Cloudinary: ${item.cloudUrl ? "Hosted" : "Not Hosted"})`);
                       router.push({
                         pathname: "/creation/[id]",
                         params: { id: item.id },
                       });
                     } else {
+                      console.log(`[History] 🔘 Opening Scan Result for item: "${item.id}"`);
                       router.push({
                         pathname: "/scan-result/[id]",
                         params: { id: item.id },
